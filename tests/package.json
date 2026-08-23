@@ -1,0 +1,22 @@
+{
+  "name": "fleet-graph-plugin-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "drive": "node drive-harness.mjs",
+    "hostile": "node hostile-harness.mjs",
+    "loop2": "node loop2-harness.mjs",
+    "loop5": "node loop5-harness.mjs",
+    "tree": "node loop6-harness.mjs",
+    "composer": "node loop7-harness.mjs",
+    "loop8": "node loop8-harness.mjs",
+    "render": "node render-harness.mjs",
+    "boundary": "node boundary-harness.mjs",
+    "create": "node c4-create-probe.mjs"
+  },
+  "dependencies": {
+    "acorn": "^8.15.0",
+    "react": "^18.0.0",
+    "react-test-renderer": "^18.0.0"
+  }
+}

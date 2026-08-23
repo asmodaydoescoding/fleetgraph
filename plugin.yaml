@@ -1,0 +1,4 @@
+name: fleet-graph
+version: 0.6.1
+description: "The org chart is the interface — Fleet Command deck (team-grouped cards, status chips, capability lines, docked inspector, search/filters), interactive graph with discussion glow, message composer with validated frames (talk/delegate/supervisor + peer-recipient routing), live activity tails, inbox read-state, semantic specialist routing, and full member creation."
+api: plugin_api.py

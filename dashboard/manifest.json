@@ -1,0 +1,13 @@
+{
+  "name": "fleet-graph",
+  "label": "Fleet Graph",
+  "description": "Hierarchical command graph for the bot fleet — edit supervisor/subordinate topology, simulate allowed comms, watch supervisor inboxes",
+  "icon": "GitBranch",
+  "version": "0.6.1",
+  "tab": {
+    "path": "/fleet-graph",
+    "position": "after:skills"
+  },
+  "entry": "dist/index.js",
+  "api": "plugin_api.py"
+}
