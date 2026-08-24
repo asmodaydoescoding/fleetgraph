@@ -394,7 +394,10 @@ def discover_missing_profiles() -> list[dict]:
         if not entry.is_dir():
             continue
         name = entry.name
-        if name in known or name.startswith("."):
+        # '_meta' is reserved by the YAML document layout (normalize drops
+        # it silently), so offering it for import would report success
+        # while the node never appears. Exclude at discovery.
+        if name in known or name.startswith(".") or name == "_meta":
             continue
         title = ""
         description = ""
@@ -442,7 +445,14 @@ def import_existing_profiles(
     on_disk: set[str] = set()
     if root.is_dir():
         for entry in root.iterdir():
-            if entry.is_dir() and not entry.name.startswith("."):
+            # '_meta' excluded for the same reason as in discovery: the
+            # reserved name would vanish at normalize() after a claimed
+            # success. Defense in depth if import is called directly.
+            if (
+                entry.is_dir()
+                and not entry.name.startswith(".")
+                and entry.name != "_meta"
+            ):
                 on_disk.add(entry.name)
 
     try:

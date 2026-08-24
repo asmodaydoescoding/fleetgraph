@@ -62,6 +62,9 @@ def main():
     check("unwired dirs discovered", "scout" in names and "weird-name.with.dots" in names)
     scout = next(d for d in discovered if d["name"] == "scout")
     check("missing SOUL.md tolerated (empty metadata)", scout["title"] in ("", "scout"))
+    # '_meta' is reserved by the YAML layout: normalize drops it silently,
+    # so discovery must never offer it (bugslayer hostile probe).
+    check("reserved _meta excluded from discovery", "_meta" not in names)
 
     # --- import semantics -----------------------------------------------
     res1 = import_existing_profiles(["scout", "weird-name.with.dots"])
@@ -80,6 +83,11 @@ def main():
     # unknown name reported, nothing else disturbed
     res3 = import_existing_profiles(["does-not-exist"])
     check("unknown name reported", "does-not-exist" in res3["unknown"])
+
+    # reserved _meta: even a direct import call must not claim success
+    (profiles_root / "_meta").mkdir(exist_ok=True)
+    res4 = import_existing_profiles(["_meta"])
+    check("reserved _meta never imports as ok", "_meta" in res4["unknown"])
 
     print()
     if failures:
