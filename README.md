@@ -1,6 +1,9 @@
 # Fleet Graph
 
-## Fleet Command
+## Fleet Graph: Fleet Command
+
+Fleet Graph is the Hermes plugin; Fleet Command is its operator-facing control
+surface for building and running the organization.
 
 Build an actual organization of Hermes agents, not just a list of profiles.
 
