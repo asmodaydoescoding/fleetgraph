@@ -22,6 +22,10 @@
 - **Live dashboard route remount.** Hermes now exposes confirmed
   `plugins.manage` → `reload_dashboard_routes`; Fleet Graph uses it to recover
   from the enabled-but-unmounted 404 state without restarting the backend.
+- **Installation contract.** Documented the Hermes-native Git installer, the
+  exact v0.8.0 pin, manifest/file verification, the required desktop-entry
+  symlink, separate backend/desktop activation, archive extraction boundaries,
+  and the fact that runtime users do not install development dependencies.
 
 ## 0.7.0 — 2026-08-24
 

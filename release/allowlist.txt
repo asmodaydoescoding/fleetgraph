@@ -31,6 +31,7 @@ tests/drive-harness.mjs
 tests/helpers/generic-fleet.mjs
 tests/helpers/paths.mjs
 tests/hostile-harness.mjs
+tests/install_contract_test.py
 tests/issue3_remount_test.py
 tests/loop2-harness.mjs
 tests/loop5-harness.mjs

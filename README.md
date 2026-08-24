@@ -107,30 +107,90 @@ otherwise stay silent.
 
 ## Install
 
-1. Copy this folder into `~/.hermes/plugins/fleet-graph/` (backend) —
-   already true if you're reading this in place.
-2. Symlink `desktop-plugin/plugin.js` into the desktop plugins path:
+Fleet Graph is a **unified Hermes plugin package** with two runtime pieces:
 
-   ```bash
-   mkdir -p ~/.hermes/desktop-plugins/fleet-graph
-   ln -s ~/.hermes/plugins/fleet-graph/desktop-plugin/plugin.js ~/.hermes/desktop-plugins/fleet-graph/plugin.js
-   ```
-3. Enable the plugin backend in `~/.hermes/config.yaml`:
+- Python dashboard backend: `dashboard/manifest.json` + `dashboard/plugin_api.py`.
+- Raw ESM desktop UI: `desktop-plugin/plugin.js`.
 
-```yaml
-plugins:
-  enabled:
-    - fleet-graph
+The runtime package is already supplied by Hermes. Plugin users do **not** need
+Node, npm, `npm ci`, pytest, Ruff, `ty`, or a development Python environment.
+Do not install `tests/` dependencies.
+
+### Preferred agent/CLI install
+
+Use Hermes' plugin installer instead of copying an archive by hand. This keeps
+the plugin under the correct Hermes home, runs Hermes' install-time security
+scan, records the source/revision, and enables the backend explicitly.
+
+```bash
+# Pin the verified Fleet Graph v0.8.0 tree for reproducible installation.
+FLEET_GRAPH_REF="878e906aafc0594976028ff29fb69c74a019932a"
+hermes plugins install asmodaydoescoding/fleetgraph \\
+  --ref "$FLEET_GRAPH_REF" \\
+  --enable
+
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+PLUGIN_DIR="$HERMES_HOME/plugins/fleet-graph"
+
+# Fail closed if the repository was installed at the wrong level.
+test -f "$PLUGIN_DIR/plugin.yaml"
+test -f "$PLUGIN_DIR/dashboard/manifest.json"
+test -f "$PLUGIN_DIR/dashboard/plugin_api.py"
+test -f "$PLUGIN_DIR/desktop-plugin/plugin.js"
+
+DESKTOP_DIR="${HERMES_HOME}/desktop-plugins/fleet-graph"
+mkdir -p "$DESKTOP_DIR"
+ln -sfn "$PLUGIN_DIR/desktop-plugin/plugin.js" "$DESKTOP_DIR/plugin.js"
+
+hermes plugins list --user --enabled --plain
 ```
 
-4. Reload desktop plugins (⌘K → "Reload desktop plugins"). If the panel
-   shows "routes are not mounted yet", the backend is enabled but its API
-   router was not mounted in the running process. Click **Remount routes** in
-   the Fleet Graph error card; the plugin calls the confirmed
-   `plugins.manage` → `reload_dashboard_routes` RPC (protocol v1) and retries the
-   API. On an older Hermes backend without that RPC, restart the dashboard once
-   (or `systemctl --user restart hermes-dashboard.service` on Linux), then press
-   Retry.
+The `desktop-plugin/plugin.js` symlink is intentional: this release stores its
+UI entry under `desktop-plugin/`, while Hermes' standalone desktop loader
+expects `$HERMES_HOME/desktop-plugins/<id>/plugin.js`. Do not copy the entire
+repository into `$HERMES_HOME/desktop-plugins/`; that produces the wrong
+layout. The symlink is safe to repeat.
+
+If installing the moving branch instead of the verified tree, omit `--ref`:
+
+```bash
+hermes plugins install asmodaydoescoding/fleetgraph --enable
+```
+
+### Manual extracted-archive install
+
+If an agent has only a downloaded Fleet Graph archive, extract it first and set
+`SOURCE_DIR` to the directory that directly contains `plugin.yaml` and
+`dashboard/manifest.json` (GitHub source archives normally add one outer
+`fleetgraph-<ref>/` directory). Then run:
+
+```bash
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+PLUGIN_DIR="$HERMES_HOME/plugins/fleet-graph"
+mkdir -p "$PLUGIN_DIR"
+cp -a "$SOURCE_DIR/." "$PLUGIN_DIR/"
+hermes plugins enable fleet-graph
+mkdir -p "$HERMES_HOME/desktop-plugins/fleet-graph"
+ln -sfn "$PLUGIN_DIR/desktop-plugin/plugin.js" \\
+  "$HERMES_HOME/desktop-plugins/fleet-graph/plugin.js"
+```
+
+Verify the same four `test -f` checks from the preferred install before
+starting Hermes. Do not point Hermes at the outer archive directory.
+
+### Activate the installed plugin
+
+1. In Hermes Desktop, run **Reload desktop plugins** from the command palette.
+2. If Fleet Graph reports that routes are not mounted, click **Remount routes**.
+   Hermes with route-remount protocol v1 applies the change without a backend
+   restart.
+3. On older Hermes versions without that RPC, restart the dashboard once (for
+   example `systemctl --user restart hermes-dashboard.service` on Linux), then
+   press **Retry**.
+
+Backend enablement and desktop loading are separate gates: `plugins.enabled`
+allows the Python API to import, while the desktop reload loads the raw UI
+entry. Both are required for the full plugin.
 
 ## Configuration
 
