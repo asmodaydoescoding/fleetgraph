@@ -1,8 +1,61 @@
 # Fleet Graph
 
-The org chart **is** the interface. A Hermes desktop plugin that renders your
-bot fleet's chain of command as an interactive graph, lets you rewire it live,
-and tails each bot's activity without opening a single terminal.
+## Fleet Command
+
+Build an actual organization of Hermes agents, not just a list of profiles.
+
+Running multiple agents creates a coordination problem: who owns a task, who can
+help, who has authority to make a decision, and when work should move up or down
+the chain. Fleet Command gives that system a persistent structure.
+
+Create or adopt bot profiles, assign their supervisors, attach reports, define
+peer relationships, and configure each member's SOUL, model, skills, and
+toolsets. The plugin writes those relationships into the fleet graph, so the
+command structure becomes part of how the agents operate rather than a diagram
+someone has to keep in their head.
+
+Use the fleet as a Deck for day-to-day operations or a Graph for understanding
+the full topology. See which bots are working, which are idle, which are
+interrupted, which have unread inboxes, and where recent inter-agent traffic is
+moving. Select any bot to inspect its live transcript, inbox, configuration,
+capability summary, and SOUL.
+
+Fleet Command also gives agents the context they need to operate inside the
+organization. Each bot receives its current position in the chain, its
+supervisor, its reports, its peers, and a roster describing what other members
+are equipped to handle. Capability matching helps identify the right specialist
+for a task instead of forcing every agent to absorb work outside its role.
+
+Communication follows the structure:
+
+- Delegate work down to reports.
+- Escalate decisions up to supervisors.
+- Coordinate laterally through declared peers.
+- Reject messages that violate the permitted relationships.
+
+That gives you a fleet with visible ownership and bounded authority instead of a
+collection of agents messaging each other arbitrarily.
+
+## What you can build with it
+
+- Specialist teams where each bot owns a defined domain, toolset, or type of
+  work.
+- Hierarchical production pipelines with supervisors coordinating research,
+  execution, review, and delivery.
+- Operations desks where a lead agent assigns incoming work to specialists and
+  escalates blockers.
+- Project teams with a manager, functional reports, and explicit peer
+  collaboration.
+- Routing networks where agents inspect the fleet roster and hand tasks to the
+  member best equipped to handle them.
+- Persistent command centers where the operator can watch activity, inspect
+  conversations, intervene, rewire the organization, and add new members
+  without editing files by hand.
+
+Fleet Command is useful when agents need more than parallel execution. It gives
+them roles, reporting lines, communication boundaries, specialist discovery,
+and an operator-facing place to build and run the whole system.
+
 
 ![Fleet Command deck — light theme](docs/fleet-command-deck-light.png)
 ![Fleet Command graph — dark theme](docs/fleet-command-graph-dark.png)
