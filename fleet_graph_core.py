@@ -19,8 +19,10 @@ Relations:
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import tempfile
+import threading
 import time
 import yaml
 from pathlib import Path
@@ -38,6 +40,71 @@ DEFAULT_PROFILE = os.environ.get("FLEET_DEFAULT_PROFILE", "default").strip() or 
 # lists discovered profiles as unassigned until the operator wires them.
 DEFAULT_GRAPH: dict = {}
 DEFAULT_RELATIONS: dict = {}
+
+
+@contextlib.contextmanager
+def write_lock(timeout: float = 10.0):
+    """Serialize read-modify-write cycles across threads AND processes.
+
+    In-process: a module-wide guard RLock held for the whole critical
+    section (reentrant so save_graph can nest inside an API handler's
+    wider lock). Cross-process: an advisory lock on a sibling `.lock`
+    file — the dashboard, the CLI, and bots save through this module
+    from separate processes, and without it concurrent read-modify-write
+    cycles silently drop each other's updates (the final state would be
+    whichever save completed last over a whole-file replace). One cached
+    fd + depth counter keeps nesting
+    safe: flock/locking treat two fds of the same file independently,
+    which would self-deadlock."""
+    lock_path = GRAPH_PATH.with_name(GRAPH_PATH.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    busy = GraphError("fleet graph is busy: another save is in progress")
+    with _thread_guard:
+        st = _flock_state
+        if st["fd"] is None:
+            f = open(lock_path, "a+")
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+                        f.seek(0)
+                        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        f.close()
+                        raise busy
+                    time.sleep(0.02)
+            st["fd"] = f
+            st["depth"] = 1
+        else:
+            st["depth"] += 1
+        try:
+            yield
+        finally:
+            st["depth"] -= 1
+            if st["depth"] <= 0:
+                f, st["fd"], st["depth"] = st["fd"], None, 0
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+                        f.seek(0)
+                        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                    else:
+                        import fcntl
+                        fcntl.flock(f, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+                finally:
+                    f.close()
+
+
+_thread_guard = threading.RLock()
+_flock_state: dict = {"fd": None, "depth": 0}
 
 
 class GraphError(ValueError):
@@ -173,7 +240,8 @@ def normalize_relations(rel: dict, graph: dict) -> dict:
     return {k: sorted(v) for k, v in sorted(out.items())}
 
 
-def save_graph(graph: dict, relations: dict | None = None) -> dict:
+def save_graph(graph: dict, relations: dict | None = None,
+               extra_metadata: dict | None = None) -> dict:
     """Persist the graph. Storage layout: a top-level `_meta:` key holds
     `{relations: {...}}`; every other top-level key is a profile node.
     (A profile literally named '_meta' is not supported — acceptable.)"""
@@ -181,6 +249,8 @@ def save_graph(graph: dict, relations: dict | None = None) -> dict:
     rel_normalized = normalize_relations(
         relations if relations is not None else load_relations(), normalized)
     metadata = load_metadata() if GRAPH_PATH.exists() else {}
+    if extra_metadata:
+        metadata.update(extra_metadata)
     metadata["relations"] = rel_normalized
     doc = {"_meta": metadata}
     for name, node in normalized.items():

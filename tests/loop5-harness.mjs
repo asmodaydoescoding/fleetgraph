@@ -75,7 +75,9 @@ export const useQueryClient = () => ({
 })
 export const cn = (...a) => a.filter(Boolean).join(' ')
 export const host = {
-  request: (m, p) => requestStub(m, p),
+  request: method => Promise.resolve(method === 'plugins.manage'
+    ? { plugins: [{ key: 'fleet-graph', status: 'enabled' }] }
+    : { providers: [] }),
   onEvent: (type, fn) => { (globalThis.__eventHandlers = globalThis.__eventHandlers || []).push(fn); return () => {} },
   notify: o => { globalThis.__lastNotify = o },
 }

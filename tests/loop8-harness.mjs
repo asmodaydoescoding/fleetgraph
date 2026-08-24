@@ -70,6 +70,7 @@ const keys = {
   overview: JSON.stringify(['fleet-graph-overview']),
   traffic: JSON.stringify(['fleet-traffic']),
   roster: JSON.stringify(['fleet-roster']),
+  tail: JSON.stringify(['fleet-tail-msgs', CAPTAIN]),
 }
 const control = {
   data: {
@@ -81,6 +82,7 @@ const control = {
   storageWrites: [],
   restCalls: [],
   hostEvents: new Set(),
+  invalidations: [],
   publish(key, value) {
     this.data[key] = value
     for (const fn of [...this.listeners]) fn(key, value)
@@ -141,7 +143,7 @@ export function useMutation({ mutationFn, onSuccess, onError }) {
   }
 }
 export const useQueryClient = () => ({
-  invalidateQueries: () => {},
+  invalidateQueries: query => { ctl.invalidations.push(query) },
   setQueryData: (queryKey, updater) => {
     const key = JSON.stringify(queryKey)
     const old = ctl.data[key]
@@ -264,6 +266,9 @@ async function publish(key, value) {
 function dispatch(type, fields = {}) {
   window.dispatchEvent({ type, ...fields })
 }
+function emitHostEvent(event) {
+  for (const fn of [...control.hostEvents]) fn(event)
+}
 
 let passed = 0
 let failed = 0
@@ -329,6 +334,29 @@ check('canvas click selects node', renderer.root.findAll(node => node.type === '
 check('selected branch keeps one non-dimmed edge', pathsByClass('fleet-edge-idle').length === 1, `idle=${pathsByClass('fleet-edge-idle').length}`)
 check('unrelated branch dims', pathsByClass('fleet-edge-dimmed').length === 1, `dimmed=${pathsByClass('fleet-edge-dimmed').length}`)
 
+// A transcript update can replace the latest row in place and may not carry
+// an id during a gateway transition. It must render without a key warning and
+// remain visible as the newest text.
+await publish(keys.tail, { messages: [{ role: 'assistant', text: 'first reply', ts: 't1' }] })
+check('latest transcript message renders without an id', textOf(renderer.toJSON()).includes('first reply'))
+await publish(keys.tail, { messages: [{ role: 'assistant', text: 'latest reply', ts: 't1' }] })
+check('in-place latest transcript update is rendered',
+  textOf(renderer.toJSON()).includes('latest reply') && !textOf(renderer.toJSON()).includes('first reply'))
+await act(async () => { emitHostEvent({ type: 'message.complete', profile: CAPTAIN }) })
+check('message completion invalidates transcript and overview',
+  control.invalidations.some(q => JSON.stringify(q.queryKey) === JSON.stringify(['fleet-tail-msgs'])) &&
+  control.invalidations.some(q => JSON.stringify(q.queryKey) === JSON.stringify(['fleet-graph-overview'])))
+
+// Deck edits are draft-backed. Graph must render the same unsaved topology,
+// rather than re-reading only the server snapshot.
+await act(async () => { buttonsByText('Configure')[0].props.onClick() })
+const supervisorSelect = renderer.root.findAll(node => node.type === 'select' && node.props['data-slot'] === 'select-root')[0]
+await act(async () => { supervisorSelect.props.onChange({ target: { value: BUILDER } }) })
+check('graph reflects an unsaved deck rewire',
+  pathsByClass('fleet-edge-idle').length === 2 && pathsByClass('fleet-edge-dimmed').length === 1,
+  `idle=${pathsByClass('fleet-edge-idle').length} dimmed=${pathsByClass('fleet-edge-dimmed').length}`)
+await act(async () => { buttonsByText('discard')[0].props.onClick() })
+
 // A traffic update on a generic profile pair must light the exact edge without
 // resetting the zoom/pan viewport.
 const canvasHost = renderer.root.findAll(node => node.type === 'div' && typeof node.props.onWheel === 'function')[0]
@@ -363,9 +391,28 @@ check('selected node removal clears stale dimming', pathsByClass('fleet-edge-dim
   `idle=${pathsByClass('fleet-edge-idle').length} dimmed=${pathsByClass('fleet-edge-dimmed').length}`)
 check('traffic with missing endpoint renders no orphan glow', pathsByClass('fleet-edge-talk').length === 0)
 
+// Built-in profile deletion is observed on the next overview refresh. The
+// deleted profile must leave both the rendered tree and all picker options,
+// without disturbing the remaining profiles.
+const afterExternalDelete = clone(reducedNodes)
+delete afterExternalDelete[BUILDER]
+delete afterExternalDelete[RESEARCH]
+await publish(keys.overview, { nodes: afterExternalDelete })
+check('external profile deletion removes graph/tree member',
+  !textOf(renderer.toJSON()).includes('Builder') && !textOf(renderer.toJSON()).includes('Research'))
+check('external profile deletion removes hierarchy options',
+  renderer.root.findAll(node => node.type === 'option' &&
+    [BUILDER, RESEARCH].includes(node.props.value)).length === 0)
+
 // Rendering output must be pristine. A warning is a release failure because
 // React dev-mode warnings become thrown act() failures in stricter hosts.
 check('no React missing-key warnings', warnings.length === 0, `warnings=${warnings.length}`)
+check('chain save sends the graph payload once',
+  /mutationFn: payload => api\.rest\('\/graph', \{ method: 'PUT', body: payload \}\)/.test(source),
+  'nested { nodes: payload } would create literal nodes/relations graph members')
+check('hierarchy removal sends explicit remove payload',
+  /body: \{ nodes, relations, remove: \[name\] \}/.test(source),
+  'profile folders stay intact while graph membership is removed')
 
 console.error = originalError
 console.log(`\nLOOP8 SUMMARY: ${passed} passed, ${failed} failed`)

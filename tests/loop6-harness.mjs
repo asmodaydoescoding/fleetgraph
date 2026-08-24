@@ -50,7 +50,12 @@ export function useMutation({ mutationFn, onSuccess, onError }) {
 }
 export const useQueryClient = () => ({ invalidateQueries: () => {}, setQueryData: () => {} })
 export const cn = (...a) => a.filter(Boolean).join(' ')
-export const host = { request: () => requestStub(), onEvent: () => () => {}, notify: () => {} }
+export const host = {
+  request: method => Promise.resolve(method === 'plugins.manage'
+    ? { plugins: [{ key: 'fleet-graph', status: 'enabled' }] }
+    : { providers: [] }),
+  onEvent: () => () => {}, notify: () => {}
+}
 export const ROUTES_AREA = 'routes'; export const SIDEBAR_NAV_AREA = 'sidebar-nav'
 export function SegmentedControl({ options, value, onChange, className }) {
   return React.createElement('div', { className }, options.map(o =>
@@ -158,6 +163,7 @@ const cfgTab = renderer.root.findAll(i => i.type === 'button' && /Configure/.tes
 await act(async () => { cfgTab.props.onClick() })
 txt = () => flatJson(renderer.toJSON()).join('|')
 check('configure tab shows supervisor editor', txt().includes('co-workers (peer relations') && txt().includes('no direct reports'))
+check('configure tab exposes explicit removal', txt().includes('hierarchy membership') && txt().includes('remove from hierarchy'))
 
 // close the inspector so dropdown options don't pollute the text assertions
 const closeBtn = renderer.root.findAll(i => i.type === 'button' && flatJson(i).join(' ').trim() === '✕')[0]
@@ -168,18 +174,18 @@ await act(async () => { searchInput.props.onChange({ target: { value: 'planner' 
 txt = () => flatJson(renderer.toJSON()).join('|')
 check('search filters to matching subtree (captain ancestor kept)', txt().includes('Captain') && txt().includes('Planner'))
 // the unattached row drops out of view when filtered: the plugin unmounts
-// its whole "unassigned" group once no out-of-graph profile survives
-// matchesFilter (plugin.js: unassigned.length === 0 -> section not rendered),
-// so absence of that section here == absence of the unrelated row itself.
-check('unrelated rows hidden by search', !txt().toLowerCase().includes('unassigned'))
+// its whole discovered-profiles group once no out-of-graph profile survives
+// matchesFilter, so absence of that section here == absence of the unrelated row itself.
+check('unrelated rows hidden by search', !txt().toLowerCase().includes('discovered profiles not in the chain'))
 await act(async () => { searchInput.props.onChange({ target: { value: '' } }) })
 
-// unassigned attach control exists
+// discovered-profile import controls exist
 const stubSelects = renderer.root.findAll(i => i.type === 'div' && i.props?.['data-select-stub'])
 const dbg = txt().toLowerCase()
-check('unassigned section offers attach select',
-  dbg.includes('unassigned') && stubSelects.length > 0,
-  `has-section=${dbg.includes('unassigned')} selects=${stubSelects.length}`)
+check('discovered section offers attach select',
+  dbg.includes('discovered profiles not in the chain') && stubSelects.length > 0,
+  `has-section=${dbg.includes('discovered profiles not in the chain')} selects=${stubSelects.length}`)
+check('discovered section offers import all', txt().includes('import all'))
 check('teams section groups by supervisor', txt().includes('teams') && txt().toUpperCase().includes('CAPTAIN'))
 check('needs-attention triage section present', /NEEDS ATTENTION/i.test(txt()))
 

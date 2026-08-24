@@ -25,8 +25,9 @@ and tails each bot's activity without opening a single terminal.
   **Message** (framed composer — see below), **Configure**
   (supervisor/reports/peer editors), **SOUL** (editor). Search filters by
   name/title/capability keeping ancestor chains; status chips filter All /
-  Conversing / Idle / Needs attention. The bottom save bar commits all draft
-  edits as one atomic PUT.
+  Conversing / Idle / Needs attention. Deck and Graph share the same live
+  topology draft, so an unsaved rewire is visible in both views immediately.
+  The bottom save bar commits all draft edits as one atomic PUT.
 - **Message composer (v0.6.1)** — open a framed conversation with any bot from
   its inspector: `talk` (bot → a peer; when it has several peers, pick the
   recipient — validated server-side against the peer list, so edges can't be
@@ -37,12 +38,22 @@ and tails each bot's activity without opening a single terminal.
   boot from UI clicks.
 - **Live activity** — status dot per bot (`complete` / in-progress /
   `interrupted`) from its latest session, plus gateway-event pulses while a
-  bot is actively working. The tail drawer polls the transcript every 4 s.
+  bot is actively working. Completed gateway turns invalidate the selected
+  transcript immediately; the tail drawer still polls every 4 s as a fallback.
+- **Built-in profile deletion sync** — the Hermes Bots/Profiles inventory is
+  authoritative. If a profile is deleted there, the next overview refresh
+  removes its graph node, hierarchy edges, supervisor/attach/start-from
+  options, and deck card. Existing reports are retained and become roots;
+  stale open-tab saves cannot resurrect the deleted profile.
 - **Inbox read-state** — unread badges computed against a per-profile
   watermark; click a badge or "Mark all read" to clear. New messages after
   marking correctly re-light the badge.
 - **Rewire inline** — change supervisors, attach/detach reports, add/remove
-  peer relations; draft edits save atomically via one PUT.
+  peer relations; draft edits save atomically via one PUT. In Configure,
+  **remove from hierarchy** removes a leaf/root graph node while retaining
+  its profile folder for later re-import; members with reports must be moved
+  first, and **demote to root** remains available through the supervisor
+  picker.
 - **Create members** — full dialog mirroring Bots "New Agent": SOUL.md at
   birth, model picker, skills + toolsets checklists applied via
   profiles.configure.
@@ -67,12 +78,12 @@ otherwise stay silent.
 
 - Profile **deletion does not prune** `fleet_graph.yaml`, inboxes, or
   watermarks — remove stale entries manually (or via a PUT) today.
-- Concurrent graph PUTs are last-write-wins; persistence is atomic
-  (temp-file + rename), but there is no merge. A partial PUT whose omitted
-  relations reference removed nodes returns a clean 422 — send the full
-  node set like the UI does. **External scripts doing read-modify-write
-  PUTs must re-GET immediately before writing**, or they can clobber a
-  concurrent UI save (drop nodes added in between).
+- Concurrent graph PUTs are serialized by a cross-process file lock and
+  **merge** over the stored topology: nodes absent from the payload keep
+  their state, removals require an explicit `remove: [name]` list, and
+  `supervisor: null` explicitly clears (demote to root). A stale client can
+  no longer wipe nodes, and external scripts no longer need a re-GET dance —
+  though re-GET before write is still good hygiene.
 - Backend edits (`plugin_api.py`) require an app restart; only the desktop
   frontend hot-reloads. The serve backend's port can change across
   restarts — resolve it from the process, don't hardcode it.
@@ -102,10 +113,14 @@ plugins:
     - fleet-graph
 ```
 
-4. Reload desktop plugins (⌘K → "Reload desktop plugins"). If the dashboard
-   service was running before install, restart it once so the Python API
-   mounts (`systemctl --user restart hermes-dashboard.service`, or relaunch
-   the desktop app).
+4. Reload desktop plugins (⌘K → "Reload desktop plugins"). **Plugin API
+   routes only mount when the Hermes backend starts** — a backend that was
+   already running before you enabled the plugin will keep returning 404
+   "Headless backend" for every fleet-graph route until it restarts. So:
+   quit and reopen the Hermes desktop app once (or `systemctl --user
+   restart hermes-dashboard.service` on Linux). If the panel still shows
+   "routes are not mounted yet", that's this exact state — one backend
+   restart fixes it.
 
 ## Configuration
 

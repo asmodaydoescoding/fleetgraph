@@ -55,7 +55,14 @@ export function useMutation({ mutationFn, onSuccess, onError }) {
 }
 export const useQueryClient = () => ({ invalidateQueries: () => {} })
 export const cn = (...a) => a.filter(Boolean).join(' ')
-export const host = { request: (m, p) => requestStub(m, p), onEvent: () => () => {}, notify: () => {} }
+export const host = {
+  request: method => Promise.resolve(method === 'plugins.manage'
+    ? { plugins: [{ key: 'fleet-graph', status: 'enabled' }] }
+    : method === 'model.options' ? { providers: [] }
+    : method === 'profiles.describe' ? { skills: [], toolsets: [] }
+    : { ok: true }),
+  onEvent: () => () => {}, notify: () => {}
+}
 export const ROUTES_AREA = 'routes'
 export const SIDEBAR_NAV_AREA = 'sidebar-nav'
 export function SegmentedControl({ options, value, onChange, className }) {

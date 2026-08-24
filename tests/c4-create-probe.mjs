@@ -40,7 +40,7 @@ export function DialogHeader(p){return React.createElement('div',null,p.children
 export function DialogTitle(p){return React.createElement('h2',null,p.children)}
 export function DialogDescription(p){return React.createElement('p',null,p.children)}
 export function DialogFooter(p){return React.createElement('div',null,p.children)}
-export function Select({key,...props}){ const ch=props.children===undefined?[]:props.children
+export function Select(props){ const ch=props.children===undefined?[]:props.children
   const items=(Array.isArray(ch)?ch:[ch]).filter(Boolean)
   globalThis.__lastSelectItems = items.map(o=>({value:o?.props?.value,label:o?.props?.children??''}))
   return React.createElement('select',{onChange:e=>props.onChange&&props.onChange(e.target.value)},
@@ -92,20 +92,21 @@ const input = renderer.root.findAll(i=>i.type==='input')[0]
 for (const candidate of ['planner-', 'PLANNER', 'my agent!', '-lead', 'x']) {
   await RTR.act(async()=>{ input.props.onChange({target:{value:candidate}}); await new Promise(r=>setTimeout(r,50)) })
   const t = flat(renderer.toJSON()).join('|')
-  const createBtn = renderer.root.findAll(i=>i.type==='button'&&flat(i).join(' ').trim()==='Create')[0]
+  const actionBtn = renderer.root.findAll(i => i.type==='button' && ['Create', 'Adopt & wire in'].includes(flat(i).join(' ').trim()))[0]
+  const actionLabel = actionBtn ? flat(actionBtn).join(' ').trim() : ''
   const slugPreview = candidate.toLowerCase().replace(/[^a-z0-9-]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'')
   if (candidate === 'planner-') {
-    // trailing dash stripped -> 'planner' -> duplicate of existing
-    check(`near-dupe "${candidate}" blocked`, createBtn.props.disabled === true)
+    // trailing dash stripped -> 'planner' -> existing profile is adopted and wired
+    check(`near-dupe "${candidate}" offers adoption`, actionBtn && !actionBtn.props.disabled && actionLabel === 'Adopt & wire in')
   } else if (candidate === 'PLANNER') {
-    check(`case-collapsed "${candidate}" blocked as dupe`, createBtn.props.disabled === true)
+    check(`case-collapsed "${candidate}" offers adoption`, actionBtn && !actionBtn.props.disabled && actionLabel === 'Adopt & wire in')
   } else if (candidate === 'my agent!') {
-    check(`"my agent!" produces usable slug + enabled`, createBtn && createBtn.props.disabled === false,
+    check(`"my agent!" produces usable slug + enabled`, actionBtn && actionBtn.props.disabled === false,
       `slug would be "${slugPreview}"`)
   } else if (candidate === '-lead') {
-    check(`leading-dash "-lead" enabled (slug cleans it)`, createBtn && createBtn.props.disabled === false)
+    check(`leading-dash "-lead" enabled (slug cleans it)`, actionBtn && actionBtn.props.disabled === false)
   } else if (candidate === 'x') {
-    check(`single char "x" rejected by length rule`, createBtn && createBtn.props.disabled === true)
+    check(`single char "x" rejected by length rule`, actionBtn && actionBtn.props.disabled === true)
   }
 }
 console.log(`CREATE-DIALOG PROBE: ${passed} passed, ${failed} failed`)

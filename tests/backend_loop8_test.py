@@ -42,7 +42,7 @@ with tempfile.TemporaryDirectory(prefix="fleet-loop8-backend-") as td:
     profiles.mkdir(parents=True)
     inbox.mkdir()
     graph_path = home / "fleet_graph.yaml"
-    for name in ("relay-hub", "edge-worker", "pngbot", "webpbot", "dirbot"):
+    for name in ("relay-hub", "edge-worker", "pngbot", "webpbot", "dirbot", "purge-me"):
         (profiles / name).mkdir()
 
     initial_doc = {
@@ -51,12 +51,13 @@ with tempfile.TemporaryDirectory(prefix="fleet-loop8-backend-") as td:
             "root_owner_label": "operator",
             "relations": {"relay-hub": ["edge-worker"]},
         },
-        "captain": {"subordinates": ["relay-hub", "pngbot", "webpbot", "dirbot"]},
+        "captain": {"subordinates": ["relay-hub", "pngbot", "webpbot", "dirbot", "purge-me"]},
         "relay-hub": {"supervisor": "captain", "subordinates": []},
         "edge-worker": {"subordinates": []},
         "pngbot": {"supervisor": "captain", "subordinates": []},
         "webpbot": {"supervisor": "captain", "subordinates": []},
         "dirbot": {"supervisor": "captain", "subordinates": []},
+        "purge-me": {"supervisor": "captain", "subordinates": []},
     }
     graph_path.write_text(yaml.safe_dump(initial_doc, sort_keys=True))
     os.environ.update({
@@ -91,6 +92,35 @@ with tempfile.TemporaryDirectory(prefix="fleet-loop8-backend-") as td:
           update.status_code == 200 and stale_send.status_code == 422,
           f"put={update.status_code} send={stale_send.status_code} body={stale_send.text[:160]}")
     check("refused stale recipient writes no inbox", before_files == after_files)
+
+    # Simulate the built-in Bots/Profiles delete: the profile directory is
+    # removed outside this plugin while the separate topology file is stale.
+    (profiles / "purge-me").rmdir()
+    after_profile_delete = api.overview(light="1")
+    check("overview reconciles an externally deleted profile",
+          "purge-me" not in after_profile_delete["nodes"] and
+          "purge-me" not in core.load_graph(),
+          f"nodes={sorted(after_profile_delete['nodes'])}")
+    stale_readd = api.put_graph(api.GraphUpdate(nodes={
+        "purge-me": api.NodeUpdate(supervisor="captain"),
+    }))
+    check("stale graph save cannot resurrect deleted profile",
+          "purge-me" not in core.load_graph() and
+          "purge-me" not in stale_readd["graph"],
+          f"graph={sorted(stale_readd['graph'])}")
+
+    # Explicit hierarchy removal removes only the graph node. The profile
+    # directory remains available for later re-import, while the parent edge
+    # is updated in the same atomic request.
+    remove_response = client.put(f"{base}/graph", json={
+        "nodes": {"captain": {"subordinates": ["relay-hub", "webpbot", "dirbot"]}},
+        "relations": {}, "remove": ["pngbot"],
+    })
+    removed_graph = core.load_graph()
+    check("leaf removal drops graph node but retains profile",
+          remove_response.status_code == 200 and "pngbot" not in removed_graph and
+          (profiles / "pngbot").is_dir(),
+          f"status={remove_response.status_code} nodes={sorted(removed_graph)}")
 
     # Avatar extension determines the data-URI MIME; occupied directory shapes
     # are ignored instead of read as files.
@@ -189,11 +219,18 @@ with tempfile.TemporaryDirectory(prefix="fleet-loop8-backend-") as td:
                 errors.append(f"saver:{exc}")
 
     def reader() -> None:
+        # PUT /graph MERGES payload over disk (stale-client protection):
+        # the pre-loop save seeds {captain, worker-0}; later alternating
+        # saves may add worker-1 but nothing ever shrinks the set. Any
+        # other shape = a torn or lost write.
         for _ in range(160):
             try:
                 payload = api.overview(light="1")
                 graph_names = {name for name, node in payload["nodes"].items() if node.get("in_graph")}
-                if graph_names not in ({"captain", "worker-0"}, {"captain", "worker-1"}):
+                if graph_names not in (
+                    {"captain", "worker-0"},
+                    {"captain", "worker-0", "worker-1"},
+                ):
                     errors.append(f"reader-shape:{sorted(graph_names)}")
                 if core.load_profile_aliases() != {"captain": "default"}:
                     errors.append("reader-alias-metadata-lost")

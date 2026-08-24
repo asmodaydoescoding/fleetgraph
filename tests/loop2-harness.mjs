@@ -54,7 +54,12 @@ export function useMutation({ mutationFn, onSuccess, onError }) {
 export const useQueryClient = () => ({ invalidateQueries: () => {}, setQueryData: () => {} })
 export const cn = (...a) => a.filter(Boolean).join(' ')
 export const host = {
-  request: (m, p) => requestStub(m, p), onEvent: () => () => {}, notify: o => globalThis.__lastNotify = o,
+  request: method => Promise.resolve(method === 'plugins.manage'
+    ? { plugins: [{ key: 'fleet-graph', status: 'enabled' }] }
+    : method === 'model.options' ? { providers: [] }
+    : method === 'profiles.describe' ? { skills: [], toolsets: [] }
+    : { ok: true }),
+  onEvent: () => () => {}, notify: o => globalThis.__lastNotify = o,
 }
 export const ROUTES_AREA = 'routes'
 export const SIDEBAR_NAV_AREA = 'sidebar-nav'
@@ -135,9 +140,9 @@ const nameInput = renderer.root.findAll(i => i.type === 'input')[0]
 await act(async () => { nameInput.props.onChange({ target: { value: CAPTAIN } }) })
 txt = () => flatJson(renderer.toJSON()).join('|')
 check('duplicate warning shown for existing name', txt().includes('already exists'))
-const createBtns = renderer.root.findAll(i => i.type === 'button' && flatJson(i).join(' ').trim() === 'Create')
-const cbtn = createBtns[0]
-check('Create disabled while duplicate', cbtn && cbtn.props.disabled === true)
+const actionBtns = renderer.root.findAll(i => i.type === 'button' && ['Create', 'Adopt & wire in'].includes(flatJson(i).join(' ').trim()))
+const cbtn = actionBtns[0]
+check('Adopt & wire in enabled for duplicate', cbtn && cbtn.props.disabled === false && flatJson(cbtn).join(' ').trim() === 'Adopt & wire in')
 
 // rename to unique → warning clears, Create enables
 await act(async () => { nameInput.props.onChange({ target: { value: BUILDER } }) })

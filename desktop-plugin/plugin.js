@@ -265,6 +265,41 @@ function useRoster() {
   })
 }
 
+// ─── backend self-heal ──────────────────────────────────────────────
+// The desktop panel loads from desktop-plugins/, but its Python API only
+// mounts when this plugin's backend is enabled in config.yaml
+// (`plugins.enabled`). A fresh install that skipped that step shows a dead
+// view with no hint why. Detect the exact state through the gateway's
+// plugins.manage RPC (same primitive Settings -> Plugins uses) and offer a
+// one-click enable. If the RPC is unavailable (older gateway), everything
+// degrades to the plain error card.
+function useBackendHeal(overviewFailed) {
+  const qc = useQueryClient()
+  const check = useQuery({
+    queryKey: ['fleet-backend-state'],
+    queryFn: () => host.request('plugins.manage', { action: 'list' }),
+    staleTime: 30 * 1000,
+    retry: 1,
+  })
+  const row = useMemo(() => ((check.data?.plugins) || []).find(p =>
+    p.key === ID || p.name === ID), [check.data])
+  // Three states (issue #3): config-disabled -> offer Enable; enabled but
+  // the API still 404s -> the server predates the enable, only a backend
+  // restart remounts routes; no plugins.manage row (older gateway) or any
+  // other case -> plain error card.
+  const backendDisabled = !!row && row.status !== 'enabled'
+  const backendNeedsRestart = !!overviewFailed && !!row && row.status === 'enabled'
+  const enable = useMutation({
+    mutationFn: () => host.request('plugins.manage', { action: 'toggle', key: ID, enable: true }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['fleet-backend-state'] })
+      host.notify({ kind: 'success', message: 'Backend enabled — press Retry; if the API still sleeps, restart Hermes once so the routes mount.' })
+    },
+    onError: e => host.notify({ kind: 'error', message: String(e?.message || e) }),
+  })
+  return { backendDisabled, backendNeedsRestart, enable }
+}
+
 /** Edge key for a pair of bots (order-independent). */
 const pairKey = (a, b) => [a, b].sort().join('\u0000')
 
@@ -595,8 +630,11 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
     ? existingProfiles
     : Object.entries(existingProfiles || {}).map(([graphName, node]) => node?.profile || graphName)
   const knownNames = useMemo(() => new Set(profileNames), [existingProfiles])
-  // duplicate guard: a dup blocks Create with a visible warning rather than a
-  // backend error toast after partial side effects.
+  // duplicate name: no longer a blocker — Create ADOPTS the existing profile
+  // (skips creation, still applies persona/capabilities and graph wiring).
+  // This is the repair path for a half-created member: profiles.create
+  // succeeded earlier but the graph write failed (e.g. backend was disabled),
+  // leaving a profile with no node.
   const dupe = valid && knownNames.has(slug)
   // name typed but slug unusable (e.g. all punctuation): explain why Create is off
   const nameInvalid = name.trim().length > 0 && !valid
@@ -604,48 +642,55 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
     mutationFn: async () => {
       const picked = modelChoice ? modelChoices.find(c => `${c.provider}\u0000${c.model}` === modelChoice) : undefined
 
-      await host.request('profiles.create', {
-        name: slug,
-        description: description || (title ? `${title} — fleet member.` : ''),
-        clone_from: cloneFrom || undefined,
-        soul: soul || undefined,
-        provider: picked?.provider,
-        model: picked?.model,
-      })
+      // existing profile -> adopt it instead of failing on profiles.create
+      if (!knownNames.has(slug)) {
+        await host.request('profiles.create', {
+          name: slug,
+          description: description || (title ? `${title} — fleet member.` : ''),
+          clone_from: cloneFrom || undefined,
+          soul: soul || undefined,
+          provider: picked?.provider,
+          model: picked?.model,
+        })
 
-      // apply skill/toolset picks via profiles.configure (replace semantics)
-      const capPayload = {}
-      if (showAdvanced) {
-        const disabled = (skills || []).filter(s => !selectedSkills.has(s.name)).map(s => s.name)
-        if (disabled.length) capPayload.disabled_skills = disabled
+        // apply skill/toolset picks via profiles.configure (replace semantics)
+        const capPayload = {}
+        if (showAdvanced) {
+          const disabled = (skills || []).filter(s => !selectedSkills.has(s.name)).map(s => s.name)
+          if (disabled.length) capPayload.disabled_skills = disabled
 
-        const enabledTs = [...selectedToolsets]
-        if (enabledTs.length && enabledTs.length < (toolsets || []).length) {
-          capPayload.enabled_toolsets = enabledTs
+          const enabledTs = [...selectedToolsets]
+          if (enabledTs.length && enabledTs.length < (toolsets || []).length) {
+            capPayload.enabled_toolsets = enabledTs
+          }
+        }
+        if (Object.keys(capPayload).length) {
+          await host.request('profiles.configure', { name: slug, ...capPayload })
         }
       }
-      if (Object.keys(capPayload).length) {
-        await host.request('profiles.configure', { name: slug, ...capPayload })
-      }
 
-      // wire into the chain
-      if (supervisor) {
+      // ALWAYS wire the new member into the chain — a profile with no graph
+      // node sits in limbo and breaks later edits that reference it ("X is
+      // not a known profile"). No supervisor picked = it joins as root.
+      {
         const payload = {}
         for (const [n, v] of Object.entries(existingProfiles || {})) {
           payload[n] = { supervisor: v.supervisor ?? null, subordinates: v.subordinates ?? [] }
         }
-        payload[slug] = { supervisor, subordinates: [] }
-        if (payload[supervisor]) payload[supervisor].subordinates = [...new Set([...(payload[supervisor].subordinates || []), slug])]
+        payload[slug] = { supervisor: supervisor || null, subordinates: [] }
+        if (supervisor && payload[supervisor]) payload[supervisor].subordinates = [...new Set([...(payload[supervisor].subordinates || []), slug])]
         await api.rest('/graph', { method: 'PUT', body: { nodes: payload } })
       }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['fleet-graph-overview'] })
-      host.notify({ kind: 'success', message: `Profile "${slug}" created and wired in` })
+      host.notify({ kind: 'success', message: knownNames.has(slug)
+        ? `Profile "${slug}" adopted and wired into the chain`
+        : `Profile "${slug}" created and wired in` })
       onDone()
     },
     onError: e => host.notify({ kind: 'error', message:
-      `create failed: ${String(e?.message || e)} — if the profile dir was already made, remove it in Bots before retrying` })
+      `create failed: ${String(e?.message || e)} — if the profile dir already exists, Create will adopt it on retry` })
   })
 
   const allGraphNames = [...graphNames, slug].filter(Boolean)
@@ -667,10 +712,11 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
             placeholder: 'profile name (any case — becomes a slug)',
             value: name, onChange: e => setName(e.target.value)
           }),
+          jsx('div', { className: 'text-[0.625rem] text-(--ui-text-secondary)', children: 'becomes its handle everywhere — chat routing (/match), its node in the graph, and its profile folder' }),
           name.trim() && valid && jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-secondary)', children: `will create profile "${slug}"` }),
           dupe && jsx('div', {
-            className: 'text-xs font-medium text-(--fg-danger)',
-            children: `a profile named "${slug}" already exists — pick another name`
+            className: 'text-xs font-medium text-(--fg-warning)',
+            children: `a profile named "${slug}" already exists — Create will adopt it and wire it into the chain`
           }),
           nameInvalid && jsx('div', {
             className: 'text-xs font-medium text-(--fg-warning)',
@@ -680,32 +726,43 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
             placeholder: 'display title (e.g. "Scout")',
             value: title, onChange: e => setTitle(e.target.value)
           }),
+          jsx('div', { className: 'text-[0.625rem] text-(--ui-text-secondary)', children: 'short label shown on its card — not used for routing' }),
           jsx(Textarea, {
             className: 'h-16 resize-none text-xs',
             placeholder: 'role description',
             value: description, onChange: e => setDescription(e.target.value)
           }),
-          jsxs('div', { className: 'flex gap-2', children: [
-            jsx(Select, {
-              value: supervisor, onChange: setSupervisor, className: 'flex-1',
-              children: [
-                jsx('option', { value: '', children: '— assign supervisor —' }, 'empty'),
-                ...allGraphNames.filter(p => p !== slug).map(p => jsx('option', { value: p, children: p }, p))
-              ]
-            }),
-            jsx(Select, {
-              value: cloneFrom, onChange: setCloneFrom, className: 'flex-1',
-              children: [
-                jsx('option', { value: '', children: 'fresh profile' }, 'ph'),
-                ...cloneProfiles.map(p => jsx('option', { value: p, children: `clone ${p}` }, p))
-              ]
-            })
+          jsx('div', { className: 'text-[0.625rem] text-(--ui-text-secondary)', children: 'what this member is for — other bots read it when deciding who to route work to' }),
+          jsxs('div', { className: 'grid grid-cols-2 gap-2', children: [
+            jsxs('label', { className: 'flex min-w-0 flex-col gap-1', children: [
+              jsx('span', { className: 'text-[0.6875rem] font-medium text-(--ui-text-primary)', children: 'Supervisor (optional)' }),
+              jsx(Select, {
+                value: supervisor, onChange: setSupervisor, className: 'w-full',
+                children: [
+                  jsx('option', { value: '', children: 'No supervisor — make it a root' }, 'empty'),
+                  ...allGraphNames.filter(p => p !== slug).map(p => jsx('option', { value: p, children: p }, p))
+                ]
+              }),
+              jsx('span', { className: 'text-[0.625rem] leading-tight text-(--ui-text-secondary)', children: 'Who it reports to and where it sits in the fleet chain. Blank makes it a top-level member.' })
+            ] }),
+            jsxs('label', { className: 'flex min-w-0 flex-col gap-1', children: [
+              jsx('span', { className: 'text-[0.6875rem] font-medium text-(--ui-text-primary)', children: 'Start from (optional)' }),
+              jsx(Select, {
+                value: cloneFrom, onChange: setCloneFrom, className: 'w-full',
+                children: [
+                  jsx('option', { value: '', children: 'Fresh profile' }, 'ph'),
+                  ...cloneProfiles.map(p => jsx('option', { value: p, children: `Copy ${p}` }, p))
+                ]
+              }),
+              jsx('span', { className: 'text-[0.625rem] leading-tight text-(--ui-text-secondary)', children: "Copies an existing member's starting persona, skills, and tools. Leave fresh to configure it yourself." })
+            ] })
           ] }),
           jsx(Textarea, {
             className: 'h-20 resize-none font-mono text-[0.6875rem]',
             placeholder: 'SOUL.md (leave blank to auto-generate from name/title/description)',
             value: soul, onChange: e => setSoul(e.target.value)
           }),
+          jsx('div', { className: 'text-[0.625rem] text-(--ui-text-secondary)', children: 'its personality + standing rules — written to its own SOUL.md; blank is fine, it gets generated from the name/title/description' }),
           jsx('label', {
             className: 'flex items-center gap-2 text-xs text-(--ui-text-secondary)',
             children: [
@@ -715,11 +772,13 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
               }, 'advcb'),
               'Advanced: model + skills + toolsets'
             ]
-          }, 'adv')
+          }, 'adv'),
+          showAdvanced && jsx('div', { className: 'text-[0.625rem] text-(--ui-text-secondary)', children: 'all optional — a new member works fine inheriting defaults; set these only when it needs its own model or fewer tools' }),
         ] }),
         showAdvanced && jsxs('div', { className: 'mt-3 grid gap-3 border-t border-(--ui-stroke-secondary) pt-3', children: [
           // Model section
-          jsx('div', { children: jsxs('div', { className: 'flex gap-2', children: [
+          jsx('div', { children: jsxs('div', { className: 'flex flex-col gap-1', children: [
+            jsxs('div', { className: 'flex gap-2', children: [
             jsx(Input, {
               className: 'flex-1 h-7 text-xs',
               placeholder: 'filter models…',
@@ -737,9 +796,12 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
                 )
               ]
             })
+          ] }),
+          jsx('div', { className: 'text-[0.625rem] text-(--ui-text-secondary)', children: 'the LLM this member runs on — leave on inherit unless it needs a different model than yours' }),
           ] }) }),
           // Skills section
-          skills.length > 0 && jsx('div', { children: jsx('div', { className: 'flex flex-wrap gap-1', children: skills.map(s => {
+          skills.length > 0 && jsxs('div', { children: [
+            jsx('div', { className: 'flex flex-wrap gap-1', children: skills.map(s => {
             const on = selectedSkills.has(s.name)
             return jsx('label', {
               className: 'flex items-center gap-1 text-xs',
@@ -755,9 +817,12 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
                 s.tool_count ? jsx('span', { className: 'text-[0.6rem] text-(--ui-text-secondary)', children: `${s.tool_count}` }) : null
               ]
             }, s.name)
-          }) }) }),
+          }) }),
+          jsx('div', { className: 'text-[0.625rem] text-(--ui-text-secondary)', children: 'untick skills this member should NOT have — each bundles a set of commands it can run' }),
+          ] }),
           // Toolsets section
-          toolsets.length > 0 && jsx('div', { children: jsx('div', { className: 'flex flex-wrap gap-1', children: toolsets.map(t => {
+          toolsets.length > 0 && jsxs('div', { children: [
+            jsx('div', { className: 'flex flex-wrap gap-1', children: toolsets.map(t => {
             const on = selectedToolsets.has(t.name)
             return jsx('label', {
               className: 'flex items-center gap-1 text-xs',
@@ -773,7 +838,9 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
                 t.tool_count ? jsx('span', { className: 'text-[0.6rem] text-(--ui-text-secondary)', children: `${t.tool_count}` }) : null
               ]
             }, t.name)
-          }) }) }),
+          }) }),
+          jsx('div', { className: 'text-[0.625rem] text-(--ui-text-secondary)', children: 'raw tool families it may call (terminal, web, files…) — fewer = narrower blast radius; only applies when you untick at least one' }),
+          ] }),
         ] }),
         jsxs(DialogFooter, { children: [
           jsx(Button, {
@@ -781,9 +848,9 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
             children: 'Cancel'
           }),
           jsx(Button, {
-            disabled: !valid || dupe || create.isPending,
+            disabled: !valid || create.isPending,
             onClick: () => create.mutate(),
-            children: create.isPending ? 'creating…' : 'Create'
+            children: create.isPending ? 'working…' : (dupe ? 'Adopt & wire in' : 'Create')
           })
         ] })
         ]
@@ -852,12 +919,19 @@ function BotCard({ name, node, selected, onSelect, onMarkRead, talking, rosterCa
 // delegate (downward), supervisor (upward). The backend validates the edge;
 // the receiving bot resolves the frame via the initiative ladder.
 function MessageComposer({ name, node, relations }) {
+  const qc = useQueryClient()
   const [kind, setKind] = useState('talk')
   const [text, setText] = useState('')
   const [result, setResult] = useState(null)
   const send = useMutation({
     mutationFn: body => api.rest('/send', { method: 'POST', body }),
-    onSuccess: r => { setResult({ ok: true, ...r }); setText('') },
+    onSuccess: r => {
+      setResult({ ok: true, ...r })
+      setText('')
+      qc.invalidateQueries({ queryKey: ['fleet-inbox', name] })
+      qc.invalidateQueries({ queryKey: ['fleet-graph-overview'] })
+      qc.invalidateQueries({ queryKey: ['fleet-traffic'] })
+    },
     onError: e => setResult({ ok: false, error: String(e?.message || e) }),
   })
 
@@ -1030,7 +1104,10 @@ function CanvasNode({ name, node, p, live, selected, onOpen }) {
 // ActivityTail body). Inbox = fleet messages + mark-all-read. Configure =
 // the rewire editors that used to live inline in every tree row.
 function Inspector({ name, node, tab, setTab, onClose, onMarkRead,
-                     draft, setDraft, profiles, rosterCap, docked }) {
+                     draft, setDraft, profiles, rosterCap, docked,
+                     hasUnsavedChanges }) {
+  const qc = useQueryClient()
+  const [removeArmed, setRemoveArmed] = useState(false)
   // transcript query — same shape as ActivityTail used
   const q = useQuery({
     queryKey: ['fleet-tail-msgs', name],
@@ -1040,10 +1117,13 @@ function Inspector({ name, node, tab, setTab, onClose, onMarkRead,
   const inbox = useInbox(name, true)
   const msgs = inbox.data?.messages || []
   const scrollRef = useRef(null)
+  const transcriptSignature = (q.data?.messages || [])
+    .map((m, i) => `${m.id ?? `${m.ts ?? 'message'}-${i}`}:${String(m.text || '').length}`)
+    .join('\u0000')
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [q.data?.messages?.length])
+  }, [transcriptSignature])
   const ls = node?.latest_session
 
   // ── configure editors (moved verbatim from old BotRow) ──
@@ -1091,6 +1171,40 @@ function Inspector({ name, node, tab, setTab, onClose, onMarkRead,
     (draft[name]?.supervisor || null) !== p
   )
 
+  const currentNode = draft[name] || node || {}
+  const directReports = currentNode.subordinates || []
+  const removeFromHierarchy = useMutation({
+    mutationFn: () => {
+      const parent = currentNode.supervisor || null
+      const nodes = {}
+      if (parent) {
+        nodes[parent] = {
+          subordinates: (draft[parent]?.subordinates || []).filter(s => s !== name),
+        }
+      }
+      const relations = {}
+      for (const profile of profiles) {
+        if (profile === name) continue
+        const peers = (draft[profile]?.peers || []).filter(p => p !== name)
+        if (peers.length) relations[profile] = peers
+      }
+      return api.rest('/graph', {
+        method: 'PUT',
+        body: { nodes, relations, remove: [name] },
+      })
+    },
+    onSuccess: () => {
+      setRemoveArmed(false)
+      qc.invalidateQueries({ queryKey: ['fleet-graph-overview'] })
+      onClose()
+      host.notify({ kind: 'success', message: `Removed ${name} from the hierarchy; profile retained` })
+    },
+    onError: e => {
+      setRemoveArmed(false)
+      host.notify({ kind: 'error', message: String(e?.message || e) })
+    },
+  })
+
   const tabs = [['live', 'Live'], ['inbox', node.unread ? `Inbox (${node.unread})` : 'Inbox'],
                 ['message', 'Message'], ['configure', 'Configure'], ['soul', 'SOUL']]
 
@@ -1136,7 +1250,7 @@ function Inspector({ name, node, tab, setTab, onClose, onMarkRead,
           q.isLoading && jsx('div', { className: 'text-xs text-(--ui-text-secondary)', children: 'reading transcript…' }),
           !q.isLoading && (q.data?.messages || []).length === 0 &&
             jsx('div', { className: 'text-xs text-(--ui-text-secondary)', children: 'no messages in the latest session' }),
-          ...((q.data?.messages || []).map(m => jsxs('div', {
+          ...((q.data?.messages || []).map((m, i) => jsxs('div', {
             className: cn('mb-2 rounded-lg border px-2.5 py-1.5',
               m.role === 'user' ? 'border-(--ui-stroke-secondary)' : 'border-(--ui-accent)/40'),
             children: [
@@ -1147,7 +1261,7 @@ function Inspector({ name, node, tab, setTab, onClose, onMarkRead,
                 style: { color: 'var(--foreground)' },
                 children: m.text }),
             ]
-          }, m.id))),
+          }, m.id ?? `${m.ts ?? 'message'}-${i}`))),
           rosterCap?.summary && jsx('div', {
             className: 'mt-3 rounded-lg border border-dashed border-(--ui-stroke-secondary) p-2 text-[0.6875rem] text-(--ui-text-secondary)',
             children: `specialist for: ${rosterCap.summary}` }),
@@ -1167,7 +1281,7 @@ function Inspector({ name, node, tab, setTab, onClose, onMarkRead,
               m.task ? jsxs('span', { className: 'text-(--ui-text-secondary)', children: [' · ', m.task] }) : null,
               m.summary && jsx('div', { className: 'mt-0.5 text-(--ui-text-secondary)', children: m.summary }),
             ]
-          }, i)),
+          }, m.id ?? `${m.ts ?? 'inbox'}-${i}`)),
         ] }),
         tab === 'configure' && jsxs(Fragment, { children: [
           node.description && jsx('div', { className: 'mb-2 text-xs text-(--ui-text-secondary)', children: node.description }),
@@ -1208,6 +1322,28 @@ function Inspector({ name, node, tab, setTab, onClose, onMarkRead,
               ]
             }),
           ] }) }),
+          jsxs('div', { className: 'mt-4 rounded-md border border-(--ui-stroke-secondary) p-2.5', children: [
+            jsx('div', { className: 'text-[0.625rem] font-semibold uppercase tracking-wide text-(--ui-text-secondary)', children: 'hierarchy membership' }),
+            directReports.length > 0
+              ? jsx('div', { className: 'mt-1 text-[0.6875rem] leading-4 text-(--ui-text-secondary)', children: 'Move or detach this member’s reports first. A node with reports cannot be removed safely.' })
+              : hasUnsavedChanges
+                ? jsx('div', { className: 'mt-1 text-[0.6875rem] leading-4 text-(--ui-text-secondary)', children: 'Save or discard the current wiring changes before removing this member.' })
+                : jsxs('div', { className: 'mt-1 flex items-center gap-2', children: [
+                    jsx('button', {
+                      type: 'button',
+                      disabled: removeFromHierarchy.isPending,
+                      onClick: () => {
+                        if (!removeArmed) { setRemoveArmed(true); return }
+                        removeFromHierarchy.mutate()
+                      },
+                      className: 'rounded-md border border-(--fg-danger)/60 px-2.5 py-1 text-[0.6875rem] font-medium text-(--fg-danger) hover:bg-(--fg-danger)/10 disabled:opacity-40',
+                      children: removeFromHierarchy.isPending
+                        ? 'removing…'
+                        : (removeArmed ? 'click again to confirm' : 'remove from hierarchy'),
+                    }),
+                    jsx('span', { className: 'text-[0.625rem] leading-4 text-(--ui-text-secondary)', children: 'keeps the profile folder; you can import it again later' }),
+                  ] }),
+          ] }),
           jsx(Field, { label: 'co-workers (peer relations — may message each other directly)', children: jsxs('div', { className: 'flex flex-wrap items-center gap-1', children: [
             (draft[name]?.peers || []).length === 0 &&
               jsx('span', { className: 'text-xs text-(--ui-text-secondary)', children: 'no peer relations' }),
@@ -1247,7 +1383,10 @@ function Inspector({ name, node, tab, setTab, onClose, onMarkRead,
 function CanvasGraph({ nodes, draft, setDraft, profiles, selected, onSelect,
                         onMarkRead, liveProfiles, trafficIdx }) {
   const q = useOverview()
-  const data = q.data?.nodes || nodes
+  // The Deck and Graph share the same editable draft. A server refetch is
+  // still useful for runtime badges, but it must not hide an unsaved Deck
+  // rewire from the canvas.
+  const data = mergeNodesWithDraft(q.data?.nodes || nodes, draft)
   const pos = useLayout(data)
   const svgW = Math.max(720, Math.max(0, ...Object.entries(pos).map(([_, p]) => p.x)) + 220)
   const svgH = Math.max(400, Math.max(0, ...Object.entries(pos).map(([_, p]) => p.y)) + 100)
@@ -1526,12 +1665,51 @@ class Boundary extends ReactDefault.Component {
   }
 }
 
+function draftFromNodes(nodes) {
+  return Object.fromEntries(Object.entries(nodes || {}).map(([name, node]) => [name, {
+    supervisor: node.supervisor ?? null,
+    subordinates: [...(node.subordinates || [])],
+    peers: [...(node.peers || [])],
+  }]))
+}
+
+function mergeNodesWithDraft(nodes, draft) {
+  return Object.fromEntries(Object.entries(nodes || {}).map(([name, node]) => {
+    const d = draft?.[name]
+    const hasSupervisor = d && Object.prototype.hasOwnProperty.call(d, 'supervisor')
+    return [name, {
+      ...node,
+      supervisor: hasSupervisor ? d.supervisor : node.supervisor,
+      subordinates: d?.subordinates ? [...d.subordinates] : [...(node.subordinates || [])],
+      peers: d?.peers ? [...d.peers] : [...(node.peers || [])],
+    }]
+  }))
+}
+
+function topologyChanged(nodes, draft) {
+  if (!nodes || !draft) return false
+  const names = new Set([...Object.keys(nodes), ...Object.keys(draft)])
+  for (const name of names) {
+    const a = nodes[name] || {}
+    const b = draft[name] || {}
+    const supervisor = Object.prototype.hasOwnProperty.call(b, 'supervisor')
+      ? b.supervisor : a.supervisor
+    if ((a.supervisor ?? null) !== (supervisor ?? null)) return true
+    if (JSON.stringify([...(a.subordinates || [])].sort()) !==
+        JSON.stringify([...(b.subordinates || [])].sort())) return true
+    if (JSON.stringify([...(a.peers || [])].sort()) !==
+        JSON.stringify([...(b.peers || [])].sort())) return true
+  }
+  return false
+}
+
 // ─── page ────────────────────────────────────────────────────────
 function FleetGraphPage() {
   useTokens()
   const qc = useQueryClient()
   const q = useOverview()
   const trafficIdx = useTrafficIndex()
+  const { backendDisabled, backendNeedsRestart, enable: enableBackend } = useBackendHeal(q.isError)
   const [selected, setSelected] = useState(null)
   const [draft, setDraft] = useState(null)
   const [creating, setCreating] = useState(false)
@@ -1584,6 +1762,15 @@ function FleetGraphPage() {
         event.type.startsWith('reasoning.') ||
         event.type === 'status.update'
       if (!isLifecycle) return
+      if (event.type === 'message.complete') {
+        // Completed turns are persisted by the gateway after the event. Pull
+        // the transcript and activity snapshot immediately; polling remains
+        // the fallback for remotes that do not deliver gateway events.
+        qc.invalidateQueries({ queryKey: ['fleet-tail-msgs'] })
+        qc.invalidateQueries({ queryKey: ['fleet-graph-overview'] })
+      } else if (event.type === 'tool.complete') {
+        qc.invalidateQueries({ queryKey: ['fleet-graph-overview'] })
+      }
       setLiveProfiles(lpv => {
         const next = { ...lpv }
         if (event.type === 'message.complete' || event.type === 'tool.complete') {
@@ -1603,32 +1790,33 @@ function FleetGraphPage() {
     return off
   }, [])
 
+  const dirty = topologyChanged(data?.nodes, draft)
   useEffect(() => {
-    if (data?.nodes && draft === null) setDraft(structuredClone(
-      Object.fromEntries(Object.entries(data.nodes).map(([n, v]) => [n, {
-        supervisor: v.supervisor, subordinates: [...(v.subordinates || [])],
-        peers: [...(v.peers || [])]
-      }]))
-    ))
-  }, [data])
-
-  const dirty = (() => {
-    if (!data?.nodes || !draft) return false
-    return Object.keys({ ...data.nodes, ...draft }).some(n => {
-      const a = data.nodes[n] || {}
-      const b = draft[n] || {}
-      return (a.supervisor ?? null) !== (b.supervisor ?? null) ||
-        JSON.stringify([...(a.peers || [])].sort()) !== JSON.stringify([...(b.peers || [])].sort())
-    })
-  })()
+    if (!data?.nodes) return
+    if (draft) {
+      const present = new Set(Object.keys(data.nodes))
+      const pruned = Object.fromEntries(Object.entries(draft)
+        .filter(([name]) => present.has(name)))
+      if (Object.keys(pruned).length !== Object.keys(draft).length) {
+        // A profile was deleted through the built-in Bots page. Drop only that
+        // stale draft member; preserve unrelated unsaved rewires.
+        setDraft(pruned)
+        return
+      }
+    }
+    if (draft === null || !topologyChanged(data.nodes, draft)) {
+      setDraft(draftFromNodes(data.nodes))
+    }
+  }, [data?.nodes, dirty])
 
   const save = useMutation({
-    mutationFn: nodes => api.rest('/graph', { method: 'PUT', body: { nodes } }),
+    mutationFn: payload => api.rest('/graph', { method: 'PUT', body: payload }),
     onSuccess: () => {
       setErr(null)
       setSavedFlash(true)
       setTimeout(() => setSavedFlash(false), 2500)
       qc.invalidateQueries({ queryKey: ['fleet-graph-overview'] })
+      q.refetch?.()
       host.notify({ kind: 'success', message: 'Chain of command updated' })
     },
     onError: e => setErr(String(e?.message || e))
@@ -1662,14 +1850,30 @@ function FleetGraphPage() {
   }
 
   // overview failed entirely → error state with retry (ladder rung 5:
-  // bounded recovery affordance, never an infinite spinner)
+  // bounded recovery affordance, never an infinite spinner). If the backend
+  // is merely not enabled, offer the one-click self-heal instead.
   if (q.isError) {
     return jsxs('div', { className: 'fleet-graph-root p-6', children: [
       jsx(ErrorState, {
-        title: 'could not read the fleet graph',
-        description: String(q.error?.message || q.error || 'the backend did not answer'),
+        title: backendDisabled
+          ? 'the fleet graph backend is not enabled'
+          : backendNeedsRestart
+            ? 'backend enabled, but its routes are not mounted yet'
+            : 'could not read the fleet graph',
+        description: backendDisabled
+          ? 'The UI loaded, but its Python API is switched off in config.yaml (plugins.enabled). Enable it below — or add "fleet-graph" to plugins.enabled manually.'
+          : backendNeedsRestart
+            ? 'config.yaml already lists this plugin, but the running Hermes backend started before it was enabled — plugin API routes only mount at startup. Quit and reopen the Hermes desktop app once (or restart hermes serve / the dashboard service), then press Retry.'
+            : String(q.error?.message || q.error || 'the backend did not answer'),
       }),
-      jsx('div', { className: 'flex justify-center', children:
+      backendDisabled && jsx('div', { className: 'flex justify-center', children:
+        jsx(Button, {
+          disabled: enableBackend.isPending,
+          onClick: () => enableBackend.mutate(),
+          children: enableBackend.isPending ? 'enabling…' : 'Enable backend'
+        })
+      }),
+      jsx('div', { className: 'flex justify-center mt-2', children:
         jsx(Button, { variant: 'outline', onClick: () => q.refetch(), children: 'Retry' })
       })
     ] })
@@ -1682,7 +1886,7 @@ function FleetGraphPage() {
     ] })
   }
 
-  const nodes = data.nodes
+  const nodes = mergeNodesWithDraft(data.nodes, draft)
   const profiles = Object.keys(nodes).sort()
   const rosterByProfile = roster.data?.roster || {}
   const profileOf = (n) => nodes[n]?.profile || n
@@ -1834,6 +2038,7 @@ function FleetGraphPage() {
             onClose: closeInspector, onMarkRead: markRead,
             draft, setDraft, profiles,
             rosterCap: capOf(tailOpen),
+            hasUnsavedChanges: dirty,
           }),
         ] })
       : jsxs('div', { className: 'flex min-h-0 flex-1 overflow-hidden', children: [
@@ -1876,9 +2081,31 @@ function FleetGraphPage() {
                 members.map(m => cardOf(m)),
               ] }, `team-wrap-${lead}`)
             }),
-            // ── UNASSIGNED: attach controls ──
+            // ── UNASSIGNED: import controls ──
             unassigned.length > 0 && jsxs('div', { className: 'mb-4 rounded-lg border border-dashed border-(--ui-stroke-secondary) p-2.5', children: [
-              jsx('div', { className: 'mb-1.5 text-[0.625rem] font-medium uppercase tracking-[0.08em] text-(--ui-text-secondary)', children: 'unassigned — pick a supervisor' }),
+              jsxs('div', { className: 'mb-1.5 flex items-center justify-between gap-2', children: [
+                jsx('div', { className: 'text-[0.625rem] font-medium uppercase tracking-[0.08em] text-(--ui-text-secondary)', children: `discovered profiles not in the chain (${unassigned.length})` }),
+                jsx('button', {
+                  type: 'button',
+                  onClick: () => setDraft(d => {
+                    const next = structuredClone(d)
+                    // anchor: first wired root (draft wins over disk); none -> they join as their own roots
+                    const supOf = n => next[n]?.supervisor ?? data.nodes[n]?.supervisor ?? null
+                    const anchor = profiles.find(p => !unassigned.includes(p) && !supOf(p))
+                    for (const u of unassigned) {
+                      next[u] = next[u] || { supervisor: null, subordinates: [] }
+                      next[u].supervisor = anchor || null
+                      if (anchor) {
+                        next[anchor] = next[anchor] || { supervisor: null, subordinates: [] }
+                        next[anchor].subordinates = [...new Set([...(next[anchor].subordinates || []), u])]
+                      }
+                    }
+                    return next
+                  }),
+                  className: 'rounded-md border border-(--ui-stroke-secondary) px-2 py-0.5 text-[0.625rem] font-medium hover:bg-(--chrome-action-hover)',
+                  children: 'import all'
+                }),
+              ] }),
               jsxs('div', { className: 'flex flex-col gap-1.5', children: unassigned.map(u => jsxs('div', { className: 'flex items-center gap-2', children: [
                 jsx(Pill, { children: u }, `pill-${u}`),
                 jsx(Select, {
@@ -1913,6 +2140,7 @@ function FleetGraphPage() {
               draft, setDraft, profiles,
               rosterCap: capOf(tailOpen),
               docked: true,
+              hasUnsavedChanges: dirty,
             }),
           ] }) : jsx('div', { className: 'hidden w-[24rem] shrink-0 border-l border-(--ui-stroke-secondary) lg:block', children:
             jsxs('div', { className: 'fleet-inspector-empty', children: [

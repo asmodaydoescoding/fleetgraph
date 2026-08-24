@@ -32,7 +32,7 @@ sys.path.insert(0, str(_HERE.parent))
 from fleet_graph_core import (  # noqa: E402
     DEFAULT_PROFILE, FLEET_HOME, GraphError, can_communicate, chain, describe,
     graph_node_for_profile, load_graph, load_metadata, load_relations,
-    normalize_relations, resolve_profile, save_graph,
+    normalize_relations, resolve_profile, save_graph, write_lock,
 )
 
 HERMES = FLEET_HOME
@@ -52,6 +52,11 @@ class NodeUpdate(BaseModel):
 class GraphUpdate(BaseModel):
     nodes: dict[str, NodeUpdate]
     relations: dict[str, list[str]] | None = None
+    # Explicit node removals. Absent -> nothing is removed: the save MERGES
+    # payload nodes over the on-disk graph, so a stale/half-loaded client can
+    # never silently drop topology it did not include (the "new agent vanished"
+    # / "X is not a known profile" bug class). Deletion is opt-in only.
+    remove: list[str] = []
 
 
 class RelationsUpdate(BaseModel):
@@ -93,6 +98,92 @@ def _profile_dir(name: str) -> Path | None:
         return None
     except OSError:
         return None  # ENAMETOOLONG / permission / etc. — treat as not found
+
+
+def _reconcile_deleted_graph_profiles(graph: dict | None = None,
+                                      relations: dict | None = None) -> tuple[dict, dict]:
+    """Prune graph nodes whose Hermes profile was deleted elsewhere.
+
+    The built-in Profiles/Bots page owns profile-directory deletion while this
+    plugin owns the separate fleet topology file. Reconcile at every read
+    boundary so a deleted profile disappears from Deck/Graph/options promptly,
+    and so a later stale client save cannot resurrect it. Existing children of
+    a deleted supervisor become roots; peer links to deleted nodes disappear.
+    Graph-only nodes remain valid: only names previously observed as real
+    Hermes profiles are eligible for deletion reconciliation.
+    """
+    if graph is None:
+        graph = load_graph()
+    if relations is None:
+        relations = load_relations()
+
+    metadata = load_metadata()
+    deleted_profiles = set(metadata.get("deleted_profiles") or [])
+    profile_snapshot = set(metadata.get("profile_snapshot") or [])
+    current_profiles = {name for name in graph if _profile_dir(name) is not None}
+    stale = [
+        name for name in graph
+        if name in deleted_profiles or
+        (name in profile_snapshot and name not in current_profiles)
+    ]
+    next_snapshot = profile_snapshot | current_profiles
+    if not stale and next_snapshot == profile_snapshot:
+        return graph, relations
+
+    with write_lock():
+        disk = load_graph()
+        disk_relations = load_relations()
+        metadata = load_metadata()
+        deleted_profiles = set(metadata.get("deleted_profiles") or [])
+        profile_snapshot = set(metadata.get("profile_snapshot") or [])
+        current_profiles = {name for name in disk if _profile_dir(name) is not None}
+        stale = [
+            name for name in disk
+            if name in deleted_profiles or
+            (name in profile_snapshot and name not in current_profiles)
+        ]
+        next_snapshot = profile_snapshot | current_profiles
+        if not stale:
+            if next_snapshot != profile_snapshot:
+                saved = save_graph(
+                    disk,
+                    relations=disk_relations,
+                    extra_metadata={"profile_snapshot": sorted(next_snapshot)},
+                )
+                return saved, load_relations()
+            return disk, disk_relations
+
+        stale_set = set(stale)
+        cleaned = {}
+        for name, node in disk.items():
+            if name in stale_set:
+                continue
+            entry = dict(node or {})
+            if entry.get("supervisor") in stale_set:
+                entry["supervisor"] = None
+            entry["subordinates"] = [
+                child for child in (entry.get("subordinates") or [])
+                if child not in stale_set
+            ]
+            cleaned[name] = entry
+
+        cleaned_relations = {}
+        for name, peers in disk_relations.items():
+            if name in stale_set:
+                continue
+            kept = [peer for peer in (peers or []) if peer not in stale_set]
+            if kept:
+                cleaned_relations[name] = kept
+        deleted_profiles.update(stale)
+        saved = save_graph(
+            cleaned,
+            relations=cleaned_relations,
+            extra_metadata={
+                "deleted_profiles": sorted(deleted_profiles),
+                "profile_snapshot": sorted(next_snapshot),
+            },
+        )
+        return saved, load_relations()
 
 
 def _read_yaml(path: Path) -> dict:
@@ -646,7 +737,8 @@ def _latest_session(name: str) -> dict | None:
 @router.get("/graph")
 def get_graph():
     try:
-        return {"graph": describe(load_graph()), "profiles": _known_profiles()}
+        graph, relations = _reconcile_deleted_graph_profiles()
+        return {"graph": describe(graph, relations), "profiles": _known_profiles()}
     except GraphError as e:
         raise HTTPException(500, str(e))
 
@@ -660,10 +752,10 @@ def overview(light: str = ""):
     Pass ?light=1 (or true) to skip the per-profile state.db session lookups —
     the fast poll path when the UI only needs badges and topology."""
     try:
-        graph = describe(load_graph())
+        graph_raw, relations = _reconcile_deleted_graph_profiles()
+        graph = describe(graph_raw, relations)
     except GraphError as e:
         raise HTTPException(500, str(e))
-    relations = load_relations()
     known = _known_profiles()
     counts = _inbox_counts()
     unread = _unread_counts()
@@ -696,8 +788,8 @@ def graph_summary():
     """Cheap header-strip payload: node count, edge count (supervisor links +
     peer pairs), and a status histogram over each bot's latest session."""
     try:
-        graph = describe(load_graph())
-        relations = load_relations()
+        graph_raw, relations = _reconcile_deleted_graph_profiles()
+        graph = describe(graph_raw, relations)
     except GraphError as e:
         raise HTTPException(500, str(e))
     edges = sum(len(v.get("subordinates") or []) for v in graph.values())
@@ -758,20 +850,68 @@ def put_soul(name: str, body: dict):
 
 @router.put("/graph")
 def put_graph(update: GraphUpdate):
-    """Replace the graph (and optionally relations) from the UI editor."""
-    raw = {}
-    for name, node in update.nodes.items():
-        entry = {}
-        if node.supervisor:
-            entry["supervisor"] = node.supervisor
-        if node.subordinates is not None:
-            entry["subordinates"] = node.subordinates
-        raw[name] = entry
+    """Merge graph edits from the UI editor over the on-disk topology.
+
+    MERGE, not replace: nodes absent from the payload keep their disk state,
+    so a stale client tab or a half-loaded draft can never silently drop
+    other members (which later resurfaced as "'X' is not a known profile"
+    when a subsequent save referenced them). Removing a node is explicit:
+    pass its name in `remove`. Relations are replaced when provided (they
+    are validated against the merged graph)."""
     try:
-        saved = save_graph(raw, relations=update.relations if update.relations is not None else load_relations())
-        return {"ok": True, "graph": describe(saved, load_relations())}
+        _reconcile_deleted_graph_profiles()
+        with write_lock():
+            disk = load_graph()
+            known = {resolve_profile(name) for name in _known_profiles()}
+            metadata = load_metadata()
+            deleted_profiles = set(metadata.get("deleted_profiles") or [])
+
+            raw = {}
+            for name, node in update.nodes.items():
+                if name in deleted_profiles and resolve_profile(name) not in known:
+                    continue
+                entry = {}
+                if "supervisor" in node.model_fields_set:
+                    # three-state: explicit null CLEARS (demote to root),
+                    # absent PRESERVES disk state. The inspector always sends
+                    # the field, so a plain falsy check would make demotion
+                    # silently revert.
+                    entry["supervisor"] = node.supervisor
+                if node.subordinates is not None:
+                    entry["subordinates"] = node.subordinates
+                raw[name] = entry
+
+            # overlay payload onto disk state; explicit removals last
+            merged = dict(disk)
+            for name, entry in raw.items():
+                base = dict(merged.get(name, {}))
+                base.update(entry)
+                merged[name] = base
+            for name in update.remove:
+                merged.pop(name, None)
+
+            if update.relations is None:
+                relations = load_relations()
+            else:
+                relations = update.relations
+            restored = {
+                name for name in raw
+                if name in deleted_profiles and resolve_profile(name) in known
+            }
+            extra_metadata = None
+            if restored:
+                extra_metadata = {
+                    "deleted_profiles": sorted(deleted_profiles - restored),
+                }
+            saved = save_graph(
+                merged,
+                relations=relations,
+                extra_metadata=extra_metadata)
     except GraphError as e:
-        raise HTTPException(422, str(e))
+        status = 503 if "busy" in str(e) else 422
+        raise HTTPException(status, f"{e} (known profiles: {', '.join(sorted(load_graph()))})")
+
+    return {"ok": True, "graph": describe(saved, load_relations())}
 
 
 @router.get("/relations")
@@ -786,12 +926,14 @@ def get_relations():
 def put_relations(update: RelationsUpdate):
     """Replace the peer-relations map. Validated against the current graph."""
     try:
-        graph = load_graph()
-        normalized = normalize_relations(update.relations, graph)
-        save_graph(graph, relations=normalized)
+        with write_lock():
+            graph = load_graph()
+            normalized = normalize_relations(update.relations, graph)
+            save_graph(graph, relations=normalized)
         return {"ok": True, "relations": normalized}
     except GraphError as e:
-        raise HTTPException(422, str(e))
+        status = 503 if "busy" in str(e) else 422
+        raise HTTPException(status, str(e))
 
 
 @router.post("/simulate")
@@ -924,7 +1066,8 @@ def sessions_tail(profile: Optional[str] = None):
 
     Pass profile=X to scope to one bot; omit for all fleet members."""
     try:
-        graph = describe(load_graph())
+        graph_raw, relations = _reconcile_deleted_graph_profiles()
+        graph = describe(graph_raw, relations)
     except GraphError as e:
         raise HTTPException(500, str(e))
     targets = [profile] if profile else list(graph.keys())
