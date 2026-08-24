@@ -86,9 +86,14 @@ otherwise stay silent.
 
 ## Install
 
-1. Copy this folder into `~/.hermes/plugins/fleet-graph/` (backend) 
-2. Copy/symlink `~/.hermes/desktop-plugins/fleet-graph/plugin.js` if not
-   already present (the desktop app watches that path).
+1. Copy this folder into `~/.hermes/plugins/fleet-graph/` (backend) —
+   already true if you're reading this in place.
+2. Symlink `desktop-plugin/plugin.js` into the desktop plugins path:
+
+   ```bash
+   mkdir -p ~/.hermes/desktop-plugins/fleet-graph
+   ln -s ~/.hermes/plugins/fleet-graph/desktop-plugin/plugin.js ~/.hermes/desktop-plugins/fleet-graph/plugin.js
+   ```
 3. Enable the plugin backend in `~/.hermes/config.yaml`:
 
 ```yaml
