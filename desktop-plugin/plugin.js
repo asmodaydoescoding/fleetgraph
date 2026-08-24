@@ -550,6 +550,8 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
   const [selectedSkills, setSelectedSkills] = useState(new Set())
   const [selectedToolsets, setSelectedToolsets] = useState(new Set())
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  const [selectedImports, setSelectedImports] = useState(new Set())
 
   // model options
   const modelQ = useQuery({
@@ -557,6 +559,42 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
     queryFn: () => host.request('model.options', { include_unconfigured: true, explicit_only: false, refresh: true }),
     enabled: showAdvanced,
     staleTime: 60000,
+  })
+
+  // discovered on-disk profiles not yet in the graph (issue #4). Explicit
+  // import only: the backend never auto-scans at startup, so the YAML
+  // stays the sole source of truth for graph structure.
+  const discoverQ = useQuery({
+    queryKey: ['fleet-profiles-discover'],
+    queryFn: () => api.rest('/profiles/discover'),
+    enabled: showImport,
+    staleTime: 15000,
+  })
+  const discovered = discoverQ.data?.discovered || []
+  const importMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.rest('/profiles/import', {
+        method: 'POST',
+        body: {
+          profiles: [...selectedImports],
+          supervisor: supervisor || undefined,
+        },
+      })
+      return res
+    },
+    onSuccess: res => {
+      qc.invalidateQueries({ queryKey: ['fleet-graph-overview'] })
+      const n = (res.imported || []).length
+      const skipped = (res.skipped || []).length
+      host.notify({
+        kind: 'success',
+        message: `imported ${n} profile(s)${skipped ? `, skipped ${skipped} already wired` : ''}`
+      })
+      setSelectedImports(new Set())
+      setShowImport(false)
+      discoverQ.refetch()
+    },
+    onError: e => host.notify({ kind: 'error', message: `import failed: ${String(e?.message || e)}` })
   })
   const modelChoices = useMemo(() => {
     if (!modelQ.data?.providers) return []
@@ -715,7 +753,52 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
               }, 'advcb'),
               'Advanced: model + skills + toolsets'
             ]
-          }, 'adv')
+          }, 'adv'),
+          jsxs('div', { className: 'border-t border-(--ui-stroke-secondary) pt-3', children: [
+            jsx(Button, {
+              variant: 'outline',
+              onClick: () => setShowImport(v => !v),
+              children: showImport ? 'hide import' : 'import existing profiles'
+            }),
+            showImport && jsxs('div', { className: 'mt-2 flex flex-col gap-2', children: [
+              discoverQ.isLoading
+                ? jsx('div', { className: 'text-xs text-(--ui-text-secondary)', children: 'scanning profile directory…' })
+                : discovered.length === 0
+                  ? jsx('div', { className: 'text-xs text-(--ui-text-secondary)', children: 'no unwired on-disk profiles found: every profile is already in the graph' })
+                  : discovered.map(d => {
+                      const on = selectedImports.has(d.name)
+                      return jsx('label', {
+                        className: 'flex items-start gap-2 text-xs cursor-pointer',
+                        children: [
+                          jsx(Checkbox, {
+                            checked: on,
+                            onCheckedChange: v => {
+                              const next = new Set(selectedImports)
+                              v ? next.add(d.name) : next.delete(d.name)
+                              setSelectedImports(next)
+                            }
+                          }, `imp-${d.name}`),
+                          jsxs('span', { children: [
+                            jsx('div', { className: 'font-medium', children: d.name }),
+                            (d.title || d.description) && jsx('div', {
+                              className: 'text-[0.65rem] text-(--ui-text-secondary)',
+                              children: [d.title, d.description].filter(Boolean).join(' - ')
+                            })
+                          ] })
+                        ]
+                      }, `impwrap-${d.name}`)
+                    }),
+              discovered.length > 0 && jsx('div', { className: 'flex items-center gap-2', children:
+                jsx(Button, {
+                  disabled: selectedImports.size === 0 || importMutation.isPending,
+                  onClick: () => importMutation.mutate(),
+                  children: importMutation.isPending
+                    ? 'importing…'
+                    : `wire ${selectedImports.size} profile(s) into the graph`
+                })
+              })
+            ] })
+          ] }, 'impsec')
         ] }),
         showAdvanced && jsxs('div', { className: 'mt-3 grid gap-3 border-t border-(--ui-stroke-secondary) pt-3', children: [
           // Model section
