@@ -9,7 +9,7 @@ def test_install_docs_use_hermes_native_installer_and_pin():
     assert "hermes plugins install asmodaydoescoding/fleetgraph" in README
     assert "--ref \"$FLEET_GRAPH_REF\"" in README
     assert "--enable" in README
-    assert 'FLEET_GRAPH_REF="878e906aafc0594976028ff29fb69c74a019932a"' in README
+    assert 'FLEET_GRAPH_REF="a332add24501b733399ed1eb77b5e92d9b36d517"' in README
 
 
 def test_install_docs_verify_the_real_unified_package_layout():
