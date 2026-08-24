@@ -1,4 +1,4 @@
-"""Reachability contracts for Fleet Graph's approval-gated workflows."""
+"""Reachability contracts for Fleetgraph's approval-gated workflows."""
 
 from pathlib import Path
 

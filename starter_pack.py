@@ -1,4 +1,4 @@
-"""Fail-closed validation for inert Fleet Graph starter packs.
+"""Fail-closed validation for inert Fleetgraph starter packs.
 
 The validator only reads YAML/Markdown/JSON data. It never imports, executes,
 installs, or writes anything from a pack. Profile creation remains the caller's

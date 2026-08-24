@@ -7,7 +7,7 @@ license: MIT
 platforms: [linux, macos, windows]
 metadata:
   hermes:
-    tags: [Fleet Graph, profiles, recommendations, privacy]
+    tags: [Fleetgraph, profiles, recommendations, privacy]
     related_skills: []
 ---
 
@@ -35,7 +35,7 @@ analysis of message content the user has not asked to inspect.
 
 - The user explicitly requested recommendations or opted into setup analysis.
 - Hermes local insights are available through `terminal`.
-- The Fleet Graph roster is available for capability and duplicate checks.
+- The Fleetgraph roster is available for capability and duplicate checks.
 - A proposed clone source is identified before any approval request.
 
 ## Procedure
@@ -57,19 +57,19 @@ analysis of message content the user has not asked to inspect.
    - existing profiles that already cover the role;
    - source profile to clone;
    - skills/toolsets the new profile would need;
-   - proposed Fleet Graph supervisor;
+   - proposed Fleetgraph supervisor;
    - privacy notes and unresolved ambiguity.
 6. Stop for explicit approval. Present one recommendation per approval unit;
    a batch approval must list every profile that will be created.
-7. After approval, use Fleet Graph's Create flow so the canonical
+7. After approval, use Fleetgraph's Create flow so the canonical
    `profiles.create` RPC receives the chosen `clone_from` source and the new
    profile is wired into the graph. Do not substitute filesystem copying.
-8. Read back the Hermes profile inventory and Fleet Graph roster. Report the
+8. Read back the Hermes profile inventory and Fleetgraph roster. Report the
    created profile name, clone source, graph position, and any failed step.
 
-## Fleet Graph Surface
+## Fleetgraph Surface
 
-When the Fleet Graph Desktop plugin is enabled, these actions are available from
+When the Fleetgraph Desktop plugin is enabled, these actions are available from
 **Fleet workflows**:
 
 - **Review advisor** calls `/advisor/preview` and Hermes `insights.get` for a
@@ -109,5 +109,5 @@ Changes after approval: <exact profile + graph mutations>
 
 A run is complete only when the recommendation evidence is visible, the user
 approved the exact mutation, the `clone_from` source is recorded, the profile
-exists in Hermes, and the Fleet Graph readback shows the intended node without
+exists in Hermes, and the Fleetgraph readback shows the intended node without
 unapproved topology changes.

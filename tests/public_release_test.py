@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic public-release audit for Fleet Graph staging trees.
+"""Deterministic public-release audit for Fleetgraph staging trees.
 
 Exact private identifiers are supplied at runtime and remain outside Git. Audit
 output intentionally reports only private labels, repository-relative paths,
@@ -78,7 +78,7 @@ class Exemption:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Audit a Fleet Graph release tree")
+    parser = argparse.ArgumentParser(description="Audit a Fleetgraph release tree")
     parser.add_argument("--root", required=True, help="release staging root")
     parser.add_argument(
         "--private-denylist",

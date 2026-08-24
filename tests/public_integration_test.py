@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hermetic end-to-end integration suite for the shipped Fleet Graph core.
+"""Hermetic end-to-end integration suite for the shipped Fleetgraph core.
 
 Everything runs inside a throwaway temporary installation: the documented
 environment overrides redirect every storage location into a temp directory

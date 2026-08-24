@@ -29,7 +29,7 @@ executes_external_code: false
 checksum:
   algorithm: sha256
   file: fleet_graph.example.yaml
-  value: e2f32d78c30a22b9c31c8de4db62a192adb2b5f841b8b43ab5203f0ee57ae5f9
+  value: d2783acce897000f683d460a2a324b4e7a5a3c1432257a56a13c489397f5e227
 profiles:
   - name: baal
     clone_from: default

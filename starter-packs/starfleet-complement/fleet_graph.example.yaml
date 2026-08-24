@@ -1,4 +1,4 @@
-# Fleet Graph — Starfleet Complement Example
+# Fleetgraph — Starfleet Complement Example
 #
 # A working 75-node fleet topology built from Teknium's Hermes Star Trek
 # profiles (https://github.com/teknium1/hermes-star-trek-profiles), organized
@@ -6,7 +6,7 @@
 # Medical & Counsel, Red Team (Illumination Directorate), and Legal/Ethics.
 #
 # Install profiles from that collection, preview this file, and apply it
-# through Fleet Graph's reviewed graph-save flow.
+# through Fleetgraph's reviewed graph-save flow.
 #
 # Rank structure:
 #   rank 0 — High Command (4)      rank 2 — Senior Officers (33)

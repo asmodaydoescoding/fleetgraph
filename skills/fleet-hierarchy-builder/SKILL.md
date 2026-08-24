@@ -7,13 +7,13 @@ license: MIT
 platforms: [linux, macos, windows]
 metadata:
   hermes:
-    tags: [Fleet Graph, hierarchy, profiles, topology]
+    tags: [Fleetgraph, hierarchy, profiles, topology]
     related_skills: []
 ---
 
 # Fleet Hierarchy Builder Skill
 
-Builds a proposed Fleet Graph hierarchy from profiles that already exist in
+Builds a proposed Fleetgraph hierarchy from profiles that already exist in
 Hermes. It is request-driven and topology-only: analysis never edits profile
 folders, SOUL files, providers, skills, or toolsets. Applying the proposal is a
 separate, explicit operation.
@@ -23,7 +23,7 @@ separate, explicit operation.
 Use only when the user asks to:
 
 - organize existing profiles into a hierarchy;
-- write or repair a Fleet Graph topology;
+- write or repair a Fleetgraph topology;
 - map current profiles to supervisors, departments, and roots.
 
 Do not use for automatic startup scans, profile creation, profile deletion, or
@@ -36,7 +36,7 @@ silent graph rewrites.
   `terminal(command="hermes profile list")`.
 - Permission to inspect only the profile metadata needed for capability
   summaries through `terminal(command="hermes profile show <name>")`.
-- Fleet Graph's draft/apply save flow available for the final write.
+- Fleetgraph's draft/apply save flow available for the final write.
 
 ## Procedure
 
@@ -66,12 +66,12 @@ silent graph rewrites.
    roots, peer relations, unresolved decisions, and the exact number of nodes.
 7. Stop for explicit approval. “Draft it” authorizes analysis; it does not
    authorize applying the topology.
-8. On approval, apply through Fleet Graph's locked graph-save path. Never edit
+8. On approval, apply through Fleetgraph's locked graph-save path. Never edit
    `fleet_graph.yaml` with an ad-hoc filesystem write.
 9. Read back the authoritative graph and profile inventory. Confirm that only
    topology changed and that every approved edge persisted.
 
-## Fleet Graph Surface
+## Fleetgraph Surface
 
 The Desktop plugin exposes **Build hierarchy** under **Fleet workflows**. It
 sends the current staged topology to `/hierarchy/preview`, which validates and

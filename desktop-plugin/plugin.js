@@ -1,5 +1,5 @@
 /**
- * Fleet Graph — the org chart IS the interface.
+ * Fleetgraph — the org chart IS the interface.
  * ~/.hermes/desktop-plugins/fleet-graph/plugin.js
  *
  * ONE view: the command tree, drawn as an interactive SVG canvas where each
@@ -315,7 +315,7 @@ function useBackendHeal(overviewFailed) {
       qc.invalidateQueries({ queryKey: ['fleet-graph-overview'] })
       host.notify({
         kind: 'success',
-        message: `Plugin routes remounted (${result?.count || 0}); retrying the Fleet Graph API.`,
+        message: `Plugin routes remounted (${result?.count || 0}); retrying the Fleetgraph API.`,
       })
     },
     onError: e => host.notify({ kind: 'error', message: String(e?.message || e) }),
@@ -1796,7 +1796,7 @@ function StarterPacksPanel({ nodes }) {
             await host.request('profiles.create', {
               name: action.name,
               clone_from: action.clone_from,
-              description: topo.summary || topo.title || `Fleet Graph member: ${action.name}`,
+              description: topo.summary || topo.title || `Fleetgraph member: ${action.name}`,
             })
             createdProfiles.push(action.name)
           }
@@ -2483,7 +2483,7 @@ function FleetGraphPage() {
 
 export default {
   id: ID,
-  name: 'Fleet Graph',
+  name: 'Fleetgraph',
   register(ctx) {
     api = ctx
     ctx.register({

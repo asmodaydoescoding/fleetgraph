@@ -1,4 +1,4 @@
-"""Fleet Graph — Hermes agent plugin.
+"""Fleetgraph — Hermes agent plugin.
 
 Replaces the SOUL.md protocol injection with a core-sanctioned
 system-prompt section: each fleet bot's canonical "Bot Chat" session gets a

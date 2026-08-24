@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Deterministic demo Fleet Graph generator (module + CLI).
+"""Deterministic demo Fleetgraph generator (module + CLI).
 
-Emits a complete, valid Fleet Graph document as JSON for demos, docs and
+Emits a complete, valid Fleetgraph document as JSON for demos, docs and
 smoke tests. The output is fully reproducible:
 
 - every node, relation and alias below is fixed data — no clock, no RNG,
@@ -123,7 +123,7 @@ def render(document: dict, pretty: bool = False) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="build_demo_fleet.py",
-        description="Emit the deterministic demo Fleet Graph as JSON.",
+        description="Emit the deterministic demo Fleetgraph as JSON.",
     )
     parser.add_argument(
         "--pretty", action="store_true",

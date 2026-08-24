@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Issue #3 contract checks for Fleet Graph's live route-remount recovery."""
+"""Issue #3 contract checks for Fleetgraph's live route-remount recovery."""
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]

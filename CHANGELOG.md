@@ -10,7 +10,7 @@
   the plugin through explicit preview and approval actions.
 - **Starfleet Complement starter pack.** Added an optional, inert 75-node
   topology extracted from PR #5, with attribution to Teknium for the original
-  MIT-licensed profile collection and Baal-TehDriverman for the Fleet Graph
+  MIT-licensed profile collection and Baal-TehDriverman for the Fleetgraph
   topology contribution. Download and preview do not execute profile code or
   mutate the graph.
 - **Fleet Bot Advisor skill.** Added a local-only, coarse-signal workflow that
@@ -20,7 +20,7 @@
   for existing Hermes profiles. It validates cycles, unknown supervisors, and
   duplicates before an explicit topology-only apply.
 - **Live dashboard route remount.** Hermes now exposes confirmed
-  `plugins.manage` → `reload_dashboard_routes`; Fleet Graph uses it to recover
+  `plugins.manage` → `reload_dashboard_routes`; Fleetgraph uses it to recover
   from the enabled-but-unmounted 404 state without restarting the backend.
 - **Installation contract.** Documented the Hermes-native Git installer, the
   exact v0.8.0 pin, manifest/file verification, the required desktop-entry
@@ -29,7 +29,7 @@
 
 ## 0.7.0 — 2026-08-24
 
-Fleet Graph 0.7.0 is a release-hardening update focused on trustworthy topology
+Fleetgraph 0.7.0 is a release-hardening update focused on trustworthy topology
 state, profile lifecycle synchronization, messaging delivery, and operator
 recovery paths.
 
@@ -38,7 +38,7 @@ recovery paths.
 - **Profile cloning at birth.** New members query Hermes' canonical profile
   inventory and pass the selected source through `profiles.create` as
   `clone_from`; Hermes copies the source config, skills, and persona before
-  Fleet Graph wires the new member into the hierarchy.
+  Fleetgraph wires the new member into the hierarchy.
 - **Existing-profile adoption.** `Adopt & wire in` attaches a Hermes profile
   already represented by the graph without recreating it, then applies only
   the explicit description, SOUL, model, skill, and toolset edits.
@@ -97,6 +97,6 @@ UI harnesses from the `tests/` directory.
 
 ## 0.6.1
 
-Initial public Fleet Graph release with the interactive graph, Fleet Command
+Initial public Fleetgraph release with the interactive graph, Fleet Command
 deck, inspector, inbox read-state, semantic routing, discussion glow, message
 composer, SOUL editor, member creation, and topology editing.

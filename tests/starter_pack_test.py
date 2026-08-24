@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed validation contract for optional Fleet Graph starter packs."""
+"""Fail-closed validation contract for optional Fleetgraph starter packs."""
 from pathlib import Path
 import shutil
 import sys

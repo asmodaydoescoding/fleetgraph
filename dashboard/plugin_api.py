@@ -1,4 +1,4 @@
-"""Fleet Graph plugin — dashboard backend API.
+"""Fleetgraph plugin — dashboard backend API.
 
 Mounted at /api/plugins/fleet-graph/ by the dashboard plugin system.
 Thin FastAPI wrapper around fleet_graph_core (the SSOT module shared with
@@ -335,7 +335,7 @@ def roster():
 
 @router.get("/workflows")
 def workflows():
-    """Expose the two shipped Fleet Graph workflows as explicit operator actions."""
+    """Expose the two shipped Fleetgraph workflows as explicit operator actions."""
     return {
         "workflows": [
             {

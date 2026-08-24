@@ -1,6 +1,6 @@
 {
   "name": "fleet-graph",
-  "label": "Fleet Graph",
+  "label": "Fleetgraph",
   "description": "Hierarchical command graph for the bot fleet — edit supervisor/subordinate topology, simulate allowed comms, watch supervisor inboxes",
   "icon": "GitBranch",
   "version": "0.8.0",

@@ -9,15 +9,15 @@ The personas referenced by this topology are from:
 - URL: https://github.com/teknium1/hermes-star-trek-profiles
 - License: MIT
 
-## Fleet Graph topology
+## Fleetgraph topology
 
-The 75-node Fleet Graph topology was contributed by:
+The 75-node Fleetgraph topology was contributed by:
 
 - Contributor: Baal-TehDriverman (`TheDriverMan`)
 - Pull request: https://github.com/asmodaydoescoding/fleetgraph/pull/5
 - Title: Fleet+Star Trek profiles :)
 
-The Fleet Graph project is not claiming authorship of the original persona
+The Fleetgraph project is not claiming authorship of the original persona
 collection. This pack preserves the upstream and topology attribution so the
 credits travel with the optional download.
 

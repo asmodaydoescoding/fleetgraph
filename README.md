@@ -1,8 +1,8 @@
-# Fleet Graph
+# Fleetgraph
 
-## Fleet Graph: Fleet Command
+## Fleetgraph: Fleet Command
 
-Fleet Graph is the Hermes plugin; Fleet Command is its operator-facing control
+Fleetgraph is the Hermes plugin; Fleet Command is its operator-facing control
 surface for building and running the organization.
 
 Build an actual organization of Hermes agents, not just a list of profiles.
@@ -115,7 +115,7 @@ and an operator-facing place to build and run the whole system.
   clone any existing Hermes profile from the canonical profile inventory;
   cloning passes `clone_from` through `profiles.create` so the source config,
   skills, and persona are copied by Hermes itself. If a profile already exists
-  but is not wired into Fleet Graph, **Adopt & wire in** attaches it without
+  but is not wired into Fleetgraph, **Adopt & wire in** attaches it without
   recreating it and applies only the explicit edits made in the dialog.
 - **SOUL editing** — per-bot SOUL.md editor (default profile protected).
 - **Semantic routing** — `GET /api/plugins/fleet-graph/match?q=<task>&top=N`
@@ -163,7 +163,7 @@ otherwise stay silent.
 
 ## Install
 
-Fleet Graph is a **unified Hermes plugin package** with two runtime pieces:
+Fleetgraph is a **unified Hermes plugin package** with two runtime pieces:
 
 - Python dashboard backend: `dashboard/manifest.json` + `dashboard/plugin_api.py`.
 - Raw ESM desktop UI: `desktop-plugin/plugin.js`.
@@ -179,7 +179,7 @@ the plugin under the correct Hermes home, runs Hermes' install-time security
 scan, records the source/revision, and enables the backend explicitly.
 
 ```bash
-# Pin the verified Fleet Graph v0.8.0 tree for reproducible installation.
+# Pin the verified Fleetgraph v0.8.0 tree for reproducible installation.
 FLEET_GRAPH_REF="f4c8e9cf4212316dfec3daf654915411c7a84576"
 hermes plugins install asmodaydoescoding/fleetgraph \\
   --ref "$FLEET_GRAPH_REF" \\
@@ -215,7 +215,7 @@ hermes plugins install asmodaydoescoding/fleetgraph --enable
 
 ### Manual extracted-archive install
 
-If an agent has only a downloaded Fleet Graph archive, extract it first and set
+If an agent has only a downloaded Fleetgraph archive, extract it first and set
 `SOURCE_DIR` to the directory that directly contains `plugin.yaml` and
 `dashboard/manifest.json` (GitHub source archives normally add one outer
 `fleetgraph-<ref>/` directory). Then run:
@@ -237,7 +237,7 @@ starting Hermes. Do not point Hermes at the outer archive directory.
 ### Activate the installed plugin
 
 1. In Hermes Desktop, run **Reload desktop plugins** from the command palette.
-2. If Fleet Graph reports that routes are not mounted, click **Remount routes**.
+2. If Fleetgraph reports that routes are not mounted, click **Remount routes**.
    Hermes with route-remount protocol v1 applies the change without a backend
    restart.
 3. On older Hermes versions without that RPC, restart the dashboard once (for
