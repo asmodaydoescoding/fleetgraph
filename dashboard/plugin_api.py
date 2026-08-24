@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -908,10 +909,52 @@ def put_graph(update: GraphUpdate):
                 relations=relations,
                 extra_metadata=extra_metadata)
     except GraphError as e:
-        status = 503 if "busy" in str(e) else 422
-        raise HTTPException(status, f"{e} (known profiles: {', '.join(sorted(load_graph()))})")
+        if "busy" in str(e):
+            raise HTTPException(503, str(e))
+        raise HTTPException(422, _explain_graph_error(e))
 
     return {"ok": True, "graph": describe(saved, load_relations())}
+
+
+def _explain_graph_error(exc: GraphError) -> str:
+    """Turn a topology validation error into an actionable operator message.
+
+    The old text appended "(known profiles: ...)" listing GRAPH MEMBERS. When
+    the rejected name was a real Hermes profile that simply had no graph node
+    yet, the operator was told it "is not a known profile" while seeing that
+    exact name in the list — self-contradictory and unactionable. Name the two
+    cases apart: an existing profile needs importing/wiring, a missing one has
+    no profile at all.
+    """
+    message = str(exc)
+    members = sorted(load_graph())
+    detail = f"{message} (current fleet members: {', '.join(members) or 'none'})"
+
+    # Which referenced name did validation reject? Pull the quoted name so the
+    # hint speaks about that specific profile rather than guessing.
+    quoted = re.findall(r"'([^']+)'", message)
+    culprits = [
+        name for name in quoted
+        if name not in members and _profile_dir(name) is not None
+    ]
+    if culprits:
+        names = ", ".join(sorted(set(culprits)))
+        return (
+            f"{detail} — profile exists but is not a fleet member yet: {names}. "
+            "Add it to the fleet first (Deck → attach under…, or the discovered "
+            "section's import), then save the hierarchy edit."
+        )
+    unknown = [
+        name for name in quoted
+        if name not in members and _profile_dir(name) is None
+    ]
+    if unknown:
+        names = ", ".join(sorted(set(unknown)))
+        return (
+            f"{detail} — no such profile: {names}. Create it in the built-in "
+            "Bots/Profiles page first, or remove the reference from this edit."
+        )
+    return detail
 
 
 @router.get("/relations")

@@ -122,6 +122,31 @@ with tempfile.TemporaryDirectory(prefix="fleet-loop8-backend-") as td:
           (profiles / "pngbot").is_dir(),
           f"status={remove_response.status_code} nodes={sorted(removed_graph)}")
 
+    # A validation refusal must not contradict itself. `pngbot` is a real
+    # Hermes profile that is simply not a graph member yet; the old message
+    # said "not a known profile" while listing graph members as "known
+    # profiles", so the operator saw the name they typed in the very list
+    # that supposedly excluded it. The error must distinguish "not a fleet
+    # member yet" from "no such profile" and name the actionable next step.
+    orphan_attach = client.put(f"{base}/graph", json={
+        "nodes": {"captain": {"subordinates": ["relay-hub", "webpbot", "dirbot", "pngbot"]}},
+    })
+    detail = orphan_attach.json().get("detail", "")
+    member_list = detail.split("current fleet members:")[-1].split(")")[0]
+    check("refusal for a real-but-unwired profile is not self-contradictory",
+          orphan_attach.status_code == 422 and "pngbot" not in member_list,
+          f"status={orphan_attach.status_code} member_list={member_list!r}")
+    check("refusal distinguishes an existing profile from a missing one",
+          "pngbot" in detail and "profile exists" in detail,
+          f"detail={detail[:200]}")
+    check("refusal for a genuinely unknown name still reports no such profile",
+          (lambda d: "no such profile" in d)(
+              client.put(f"{base}/graph", json={
+                  "nodes": {"captain": {"subordinates": ["relay-hub", "webpbot",
+                                                         "dirbot", "nonexistent-bot"]}},
+              }).json().get("detail", "")),
+          "a name with no profile directory must not be described as existing")
+
     # Avatar extension determines the data-URI MIME; occupied directory shapes
     # are ignored instead of read as files.
     png_assets = profiles / "pngbot" / "assets"
