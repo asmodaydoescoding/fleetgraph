@@ -1,0 +1,183 @@
+id: starfleet-complement
+version: 1.0.0
+title: Starfleet Complement
+description: A 75-node command fleet organized across seven operational divisions.
+kind: topology
+optional: true
+license: MIT
+files:
+  - fleet_graph.example.yaml
+  - README.md
+  - ATTRIBUTION.md
+topology: fleet_graph.example.yaml
+source_profiles:
+  name: Hermes Star Trek Profiles
+  url: https://github.com/teknium1/hermes-star-trek-profiles
+  license: MIT
+  expected_profiles: 68
+credits:
+  profile_collection:
+    name: Teknium
+    handle: teknium1
+    url: https://github.com/teknium1/hermes-star-trek-profiles
+  topology:
+    name: Baal-TehDriverman
+    handle: TheDriverMan
+    url: https://github.com/asmodaydoescoding/fleetgraph/pull/5
+install_mode: preview_then_apply
+executes_external_code: false
+checksum:
+  algorithm: sha256
+  file: fleet_graph.example.yaml
+  value: e2f32d78c30a22b9c31c8de4db62a192adb2b5f841b8b43ab5203f0ee57ae5f9
+profiles:
+  - name: baal
+    clone_from: default
+  - name: belanna-torres
+    clone_from: default
+  - name: benjamin-sisko
+    clone_from: default
+  - name: beverly-crusher
+    clone_from: default
+  - name: borg-queen-red-team
+    clone_from: default
+  - name: chakotay
+    clone_from: default
+  - name: christine-chapel
+    clone_from: default
+  - name: christopher-pike
+    clone_from: default
+  - name: damar
+    clone_from: default
+  - name: data
+    clone_from: default
+  - name: deanna-troi
+    clone_from: default
+  - name: default
+    adopt_only: true
+  - name: elim-garak
+    clone_from: default
+  - name: ezri-dax
+    clone_from: default
+  - name: geordi-la-forge
+    clone_from: default
+  - name: guinan
+    clone_from: default
+  - name: gul-dukat-red-team
+    clone_from: default
+  - name: harry-kim
+    clone_from: default
+  - name: harry-mudd-red-team
+    clone_from: default
+  - name: hermes
+    clone_from: default
+  - name: hikaru-sulu
+    clone_from: default
+  - name: icheb
+    clone_from: default
+  - name: improvement-agent
+    clone_from: default
+  - name: jadzia-dax
+    clone_from: default
+  - name: jake-sisko
+    clone_from: default
+  - name: jean-luc-picard
+    clone_from: default
+  - name: julian-bashir
+    clone_from: default
+  - name: kai-winn-red-team
+    clone_from: default
+  - name: katherine-pulaski
+    clone_from: default
+  - name: kathryn-janeway
+    clone_from: default
+  - name: keiko-obrien
+    clone_from: default
+  - name: kes
+    clone_from: default
+  - name: khan-noonien-singh-red-team
+    clone_from: default
+  - name: kira-nerys
+    clone_from: default
+  - name: leonard-mccoy
+    clone_from: default
+  - name: lilith
+    clone_from: default
+  - name: lore-red-team
+    clone_from: default
+  - name: lucifer
+    clone_from: default
+  - name: lwaxana-troi
+    clone_from: default
+  - name: martok
+    clone_from: default
+  - name: miles-obrien
+    clone_from: default
+  - name: miles-obrien-ds9
+    clone_from: default
+  - name: montgomery-scott
+    clone_from: default
+  - name: naomi-wildman
+    clone_from: default
+  - name: neelix
+    clone_from: default
+  - name: nog
+    clone_from: default
+  - name: number-one
+    clone_from: default
+  - name: nyx
+    clone_from: default
+  - name: odo
+    clone_from: default
+  - name: ouroboros
+    clone_from: default
+  - name: pavel-chekov
+    clone_from: default
+  - name: q
+    clone_from: default
+  - name: quark
+    clone_from: default
+  - name: reginald-barclay
+    clone_from: default
+  - name: reginald-barclay-voyager
+    clone_from: default
+  - name: ro-laren
+    clone_from: default
+  - name: rom
+    clone_from: default
+  - name: rudolph-ransom-red-team
+    clone_from: default
+  - name: sarek
+    clone_from: default
+  - name: seska-red-team
+    clone_from: default
+  - name: seven-of-nine
+    clone_from: default
+  - name: sophia
+    clone_from: default
+  - name: spock
+    clone_from: default
+  - name: tasha-yar
+    clone_from: default
+  - name: the-doctor
+    clone_from: default
+  - name: thoth
+    clone_from: default
+  - name: tom-paris
+    clone_from: default
+  - name: tuvok
+    clone_from: default
+  - name: vic-fontaine
+    clone_from: default
+  - name: wesley-crusher
+    clone_from: default
+  - name: weyoun
+    clone_from: default
+  - name: william-riker
+    clone_from: default
+  - name: worf
+    clone_from: default
+  - name: worf-ds9
+    clone_from: default
+  - name: yeshua
+    clone_from: default

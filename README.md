@@ -15,7 +15,7 @@ and tails each bot's activity without opening a single terminal.
   the cursor), and click any bot to open its live transcript drawer. A valid
   operator viewport persists across sessions and is never overwritten by the
   mount default.
-- **Deck view (v0.7.0 Fleet Command)** — team-grouped card deck: NEEDS
+- **Deck view (v0.8.0 Fleet Command)** — team-grouped card deck: NEEDS
   ATTENTION triage pile, TEAMS (one header per supervisor with capability),
   UNASSIGNED with "attach under…" selects. Cards carry identity + capability
   line (from the roster), a status chip (`conversing` / `ready 2h` /
@@ -28,7 +28,7 @@ and tails each bot's activity without opening a single terminal.
   Conversing / Idle / Needs attention. Deck and Graph share the same live
   topology draft, so an unsaved rewire is visible in both views immediately.
   The bottom save bar commits all draft edits as one atomic PUT.
-- **Message composer (v0.7.0)** — open a framed conversation with any bot from
+- **Message composer (v0.8.0)** — open a framed conversation with any bot from
   its inspector: `talk` (bot → a peer; when it has several peers, pick the
   recipient — validated server-side against the peer list, so edges can't be
   faked), `delegate` (orchestrator → bot; the receiving bot splits work
@@ -66,6 +66,11 @@ and tails each bot's activity without opening a single terminal.
   ranks the fleet by capability similarity (local fastembed embeddings,
   zero API cost). `GET /roster` exposes every bot's derived capability doc
   (title/summary/keywords/toolsets from profile.yaml + SOUL.md + config).
+- **Fleet workflows** — **Review advisor** shows bounded coarse local signals and
+  review-only recommendations; **Build hierarchy** previews a validated graph
+  diff, then requires a separate **Approve & apply hierarchy** action. Neither
+  workflow sends raw transcripts or credentials, and neither creates profiles
+  automatically.
 - **Discussion glow** — edges between bots that exchanged inbox messages in
   the last 5 minutes animate with flowing accent dashes (`/traffic` feed,
   polled every 5 s), in both graph and tree views.
@@ -118,20 +123,39 @@ plugins:
     - fleet-graph
 ```
 
-4. Reload desktop plugins (⌘K → "Reload desktop plugins"). **Plugin API
-   routes only mount when the Hermes backend starts** — a backend that was
-   already running before you enabled the plugin will keep returning 404
-   "Headless backend" for every fleet-graph route until it restarts. So:
-   quit and reopen the Hermes desktop app once (or `systemctl --user
-   restart hermes-dashboard.service` on Linux). If the panel still shows
-   "routes are not mounted yet", that's this exact state — one backend
-   restart fixes it.
+4. Reload desktop plugins (⌘K → "Reload desktop plugins"). If the panel
+   shows "routes are not mounted yet", the backend is enabled but its API
+   router was not mounted in the running process. Click **Remount routes** in
+   the Fleet Graph error card; the plugin calls the confirmed
+   `plugins.manage` → `reload_dashboard_routes` RPC (protocol v1) and retries the
+   API. On an older Hermes backend without that RPC, restart the dashboard once
+   (or `systemctl --user restart hermes-dashboard.service` on Linux), then press
+   Retry.
 
 ## Configuration
 
 Fresh installs start with an empty topology. Discovered profiles appear as
 unassigned until the operator wires them; no developer fleet names or peer
 relations are seeded.
+
+## Optional starter packs and skills
+
+The release includes the inert `starter-packs/starfleet-complement/` pack. It
+is optional and never installs profiles silently. Preview its manifest,
+license, attribution, profile names, and topology first; selected new profiles
+must be created through Hermes `profiles.create` with an explicit `clone_from`,
+while profiles already present are adopted and wired rather than recreated.
+The pack contains no executable installer or arbitrary code.
+
+Two optional Hermes skills ship under `skills/`:
+
+- `fleet-bot-advisor` — local, coarse activity recommendations using the
+  sequence observe → summarize → recommend → ask → create.
+- `fleet-hierarchy-builder` — an on-demand draft, graph diff, validation, and
+  explicit apply flow for existing profiles.
+
+Both skills are approval-gated and topology/profile-lifecycle changes are
+verified by readback.
 
 Operator metadata lives beside the topology in `fleet_graph.yaml` and is not
 returned as a graph node:
@@ -191,6 +215,12 @@ No credentials are read, no network calls leave the machine.
 | `POST /simulate` | Chain-of-command permission simulation |
 | `GET /traffic?window=` | Recent inter-agent traffic for animated edge glow |
 | `GET /roster` · `GET /match?q=&top=` | Capability roster and semantic routing |
+| `GET /starter-packs` | List validated optional inert starter packs |
+| `GET /starter-packs/{id}` | Read-only pack preview with adoption/create state |
+| `POST /starter-packs/{id}/selection` | Validate selected profile actions without mutation |
+| `GET /workflows` · `GET /advisor/preview` | Shipped workflow descriptors and coarse advisor review |
+| `POST /hierarchy/preview` | Validate a staged hierarchy and return a read-only diff |
+| `PUT /hierarchy/apply` | Apply a hierarchy only with explicit `confirm: true` |
 | `POST /send` | Validated `talk` / `delegate` / `supervisor` inbox delivery |
 
 ## Development
@@ -205,9 +235,9 @@ node drive-harness.mjs     # expect: ALL BRANCHES DRIVEN
 node hostile-harness.mjs   # expect: ALL HOSTILE BRANCHES DRIVEN
 node loop2-harness.mjs     # create-dialog guards        (6 passed)
 node loop5-harness.mjs     # optimistic-UI rollback      (4 passed)
-node loop6-harness.mjs     # deck v2                     (15 passed)
+node loop6-harness.mjs     # deck v2                     (17 passed)
 node loop7-harness.mjs     # composer recipient contract (19 passed)
-node loop8-harness.mjs     # release adversarial/state seams (25 passed)
+node loop8-harness.mjs     # release adversarial/state seams (33 passed)
 node render-harness.mjs    # full render sweep           (ALL BRANCHES DRIVEN)
 node boundary-harness.mjs  # error boundary              (caught + reload present)
 ```
@@ -216,8 +246,8 @@ Integration and backend suites:
 
 ```bash
 python3 tests/public_integration_test.py       # hermetic end-to-end suite; expect INTEGRATION SUMMARY with 0 failed
-python3 tests/backend_loop8_test.py            # expect 14/14
-python3 tests/configurability_test.py          # expect 22/22
+python3 tests/backend_loop8_test.py            # expect BACKEND LOOP8 SUMMARY: 23 passed, 0 failed
+python3 tests/configurability_test.py          # expect CONFIGURABILITY SUMMARY: 21 passed, 0 failed
 ```
 
 Static audit (parse, loader-import count, token/key hygiene):

@@ -16,6 +16,7 @@ Extensions over the original surface:
 from __future__ import annotations
 
 import base64
+import datetime
 import json
 import os
 import re
@@ -33,13 +34,15 @@ sys.path.insert(0, str(_HERE.parent))
 from fleet_graph_core import (  # noqa: E402
     DEFAULT_PROFILE, FLEET_HOME, GraphError, can_communicate, chain, describe,
     graph_node_for_profile, load_graph, load_metadata, load_relations,
-    normalize_relations, resolve_profile, save_graph, write_lock,
+    normalize, normalize_relations, resolve_profile, save_graph, write_lock,
 )
+from starter_pack import PackValidationError, load_pack, selected_actions  # noqa: E402
 
 HERMES = FLEET_HOME
 INBOX_DIR = Path(os.environ.get("FLEET_INBOX_DIR", str(HERMES / "fleet-inbox"))).expanduser()
 PROFILES_DIR = Path(os.environ.get("FLEET_PROFILES_DIR", str(HERMES / "profiles"))).expanduser()
 WATERMARK_DIR = INBOX_DIR / ".read"
+STARTER_PACKS_DIR = _HERE.parent / "starter-packs"
 
 router = APIRouter()
 
@@ -62,6 +65,14 @@ class GraphUpdate(BaseModel):
 
 class RelationsUpdate(BaseModel):
     relations: dict[str, list[str]]
+
+
+class StarterPackSelection(BaseModel):
+    profiles: list[str]
+
+
+class HierarchyApply(GraphUpdate):
+    confirm: bool = False
 
 
 class SimulateSend(BaseModel):
@@ -322,6 +333,232 @@ def roster():
     return {"roster": out}
 
 
+@router.get("/workflows")
+def workflows():
+    """Expose the two shipped Fleet Graph workflows as explicit operator actions."""
+    return {
+        "workflows": [
+            {
+                "id": "fleet-bot-advisor",
+                "kind": "advisor",
+                "skill": "skills/fleet-bot-advisor/SKILL.md",
+                "version": "0.1.0",
+                "mode": "observe_summarize_recommend_ask_create",
+                "approval_required": True,
+                "raw_transcripts": False,
+                "mutates": False,
+            },
+            {
+                "id": "fleet-hierarchy-builder",
+                "kind": "hierarchy",
+                "skill": "skills/fleet-hierarchy-builder/SKILL.md",
+                "version": "0.1.0",
+                "mode": "preview_diff_validate_ask_apply",
+                "approval_required": True,
+                "raw_transcripts": False,
+                "mutates": False,
+            },
+        ],
+    }
+
+
+@router.get("/advisor/preview")
+def advisor_preview(days: int = Query(default=30, ge=1, le=90)):
+    """Return coarse local signals and review-only recommendations.
+
+    This endpoint never reads session text, credentials, tool payloads, or
+    transcript bodies. Profile creation remains a separate approved action.
+    """
+    graph = load_graph()
+    known = set(_known_profiles())
+    members = set(graph)
+    unassigned = sorted(name for name in known if name not in members)
+    recommendations = []
+    if len(known) <= 1:
+        recommendations.append({
+            "id": "review-starter-pack",
+            "reason": "Only the default profile is present; an optional starter pack may reduce setup friction.",
+            "source": "starter-packs/starfleet-complement/pack.yaml",
+            "changes_existing_profiles": False,
+            "next_step": "Preview the pack, select profiles, and approve creation individually.",
+        })
+    if unassigned:
+        recommendations.append({
+            "id": "review-existing-profiles",
+            "reason": f"{len(unassigned)} existing profile(s) are not in the fleet graph.",
+            "source": "profiles.list metadata",
+            "profiles": unassigned,
+            "changes_existing_profiles": False,
+            "next_step": "Open the hierarchy preview and approve topology-only adoption.",
+        })
+    return {
+        "days": days,
+        "signals": {
+            "profile_count": len(known),
+            "graph_member_count": len(members),
+            "unassigned_profile_count": len(unassigned),
+        },
+        "recommendations": recommendations,
+        "privacy": {
+            "local_only": True,
+            "coarse_signals": True,
+            "raw_transcripts": False,
+            "credential_capture": False,
+            "automatic_creation": False,
+        },
+        "mutates": False,
+        "approval_required": True,
+    }
+
+
+def _hierarchy_preview(update: GraphUpdate) -> dict:
+    """Validate a hierarchy draft without writing the graph."""
+    disk = load_graph()
+    merged = {name: dict(node or {}) for name, node in disk.items()}
+    for name, node in update.nodes.items():
+        entry = dict(merged.get(name, {}))
+        if "supervisor" in node.model_fields_set:
+            entry["supervisor"] = node.supervisor
+        if node.subordinates is not None:
+            entry["subordinates"] = node.subordinates
+        merged[name] = entry
+    for name in update.remove:
+        merged.pop(name, None)
+    relations = load_relations() if update.relations is None else update.relations
+    normalized = normalize(merged)
+    normalized_relations = normalize_relations(relations, normalized)
+    before = describe(disk, load_relations())
+    after = describe(normalized, normalized_relations)
+    changed = sorted(
+        name for name in set(before) | set(after)
+        if before.get(name) != after.get(name)
+    )
+    return {
+        "valid": True,
+        "mutates": False,
+        "approval_required": True,
+        "changed_profiles": changed,
+        "before": before,
+        "after": after,
+        "validation": {
+            "cycles": False,
+            "unknown_profiles": False,
+            "duplicates": False,
+        },
+    }
+
+
+@router.post("/hierarchy/preview")
+def hierarchy_preview(update: GraphUpdate):
+    """Validate and return a graph diff without mutating topology."""
+    try:
+        return _hierarchy_preview(update)
+    except GraphError as exc:
+        raise HTTPException(422, _explain_graph_error(exc)) from exc
+
+
+@router.put("/hierarchy/apply")
+def hierarchy_apply(update: HierarchyApply):
+    """Apply one reviewed hierarchy draft after explicit confirmation."""
+    if update.confirm is not True:
+        raise HTTPException(409, "hierarchy apply requires confirm=true")
+    result = put_graph(GraphUpdate(
+        nodes=update.nodes,
+        relations=update.relations,
+        remove=update.remove,
+    ))
+    return {
+        **result,
+        "workflow": "fleet-hierarchy-builder",
+        "approval": "explicit",
+        "mutates": True,
+    }
+
+
+def _starter_pack_dir(pack_id: str) -> Path:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", pack_id or ""):
+        raise HTTPException(status_code=404, detail="Starter pack not found.")
+    root = (STARTER_PACKS_DIR / pack_id).resolve()
+    try:
+        root.relative_to(STARTER_PACKS_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Starter pack not found.") from None
+    if not root.is_dir():
+        raise HTTPException(status_code=404, detail="Starter pack not found.")
+    return root
+
+
+def _public_starter_pack(pack: dict) -> dict:
+    available = set(_known_profiles())
+    public = {key: value for key, value in pack.items() if key != "root"}
+    public["profiles"] = [
+        {
+            **row,
+            "installed": row["name"] in available,
+            "action": "adopt" if row["name"] in available else "create",
+        }
+        for row in pack["profiles"]
+    ]
+    public["available_clone_sources"] = sorted(available)
+    return public
+
+
+@router.get("/starter-packs")
+def starter_packs():
+    """List optional, inert starter packs without executing pack content."""
+    rows = []
+    if STARTER_PACKS_DIR.is_dir():
+        for child in sorted(STARTER_PACKS_DIR.iterdir(), key=lambda item: item.name):
+            if not child.is_dir() or not (child / "pack.yaml").is_file():
+                continue
+            try:
+                pack = load_pack(child, available_profiles=_known_profiles())
+                rows.append({
+                    "id": pack["id"],
+                    "version": pack["version"],
+                    "title": pack["title"],
+                    "description": pack["description"],
+                    "license": pack["license"],
+                    "profile_count": len(pack["profiles"]),
+                    "checksum": pack["checksum"],
+                    "valid": True,
+                })
+            except PackValidationError as exc:
+                rows.append({"id": child.name, "valid": False, "error": str(exc)})
+    return {"packs": rows}
+
+
+@router.get("/starter-packs/{pack_id}")
+def starter_pack_preview(pack_id: str):
+    """Return a validated, read-only starter-pack preview."""
+    root = _starter_pack_dir(pack_id)
+    try:
+        return _public_starter_pack(load_pack(root, available_profiles=_known_profiles()))
+    except PackValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/starter-packs/{pack_id}/selection")
+def starter_pack_selection(pack_id: str, selection: StarterPackSelection):
+    """Validate an explicit profile selection without mutating Hermes."""
+    root = _starter_pack_dir(pack_id)
+    try:
+        pack = load_pack(root, available_profiles=_known_profiles())
+        actions = selected_actions(
+            pack,
+            selection.profiles,
+            available_profiles=_known_profiles(),
+        )
+    except PackValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "pack_id": pack["id"],
+        "profiles": actions,
+        "mutates": False,
+        "next_step": "Use profiles.create for create actions, adopt existing profiles, then apply the reviewed graph diff.",
+    }
+
+
 # ── semantic matching over the roster ──────────────────────────────
 # Local onnx embeddings via fastembed (already in the agent venv) — no API
 # calls, no cost. The model downloads once (~0.6 GB) on first use, then the
@@ -524,7 +761,7 @@ def fleet_send(msg: FleetSend):
     except GraphError as e:
         raise HTTPException(500, f"fleet graph unusable: {e}")
 
-    recipient, text = DEFAULT_PROFILE, msg.text.strip()
+    recipient = DEFAULT_PROFILE
     # 'to' names the TARGET bot; sender is resolved from the relationship:
     # delegate/supervisor imply direction, so we compute who talks to whom
     # from the graph rather than trusting the client.
@@ -1127,7 +1364,6 @@ def sessions_tail(profile: Optional[str] = None):
     targets = [profile] if profile else list(graph.keys())
     out = {}
     for name in targets:
-        node = graph.get(name, {"supervisor": None, "subordinates": []})
         try:
             f = _inbox_file(name)
             total = sum(1 for line in f.read_text().splitlines() if line.strip()) if f.exists() else 0
@@ -1145,7 +1381,6 @@ def sessions_tail(profile: Optional[str] = None):
 
 
 # ── tiny timestamp helpers (no dependency on the full hermes_cli time path) ──
-import datetime
 
 
 def _now_epoch() -> float:

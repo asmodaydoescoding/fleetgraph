@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Release 0.8.0 follow-up hardening.** Starter-pack installation now compensates
+  newly created profiles if the graph commit fails; Hermes route remounting uses
+  a versioned protocol; and the advisor/hierarchy workflows are reachable from
+  the plugin through explicit preview and approval actions.
+- **Starfleet Complement starter pack.** Added an optional, inert 75-node
+  topology extracted from PR #5, with attribution to Teknium for the original
+  MIT-licensed profile collection and Baal-TehDriverman for the Fleet Graph
+  topology contribution. Download and preview do not execute profile code or
+  mutate the graph.
+- **Fleet Bot Advisor skill.** Added a local-only, coarse-signal workflow that
+  observes, summarizes, recommends, asks for approval, and only then creates
+  selected profiles through the canonical clone/adoption flow.
+- **Fleet Hierarchy Builder skill.** Added an on-demand draft-and-diff workflow
+  for existing Hermes profiles. It validates cycles, unknown supervisors, and
+  duplicates before an explicit topology-only apply.
+- **Live dashboard route remount.** Hermes now exposes confirmed
+  `plugins.manage` → `reload_dashboard_routes`; Fleet Graph uses it to recover
+  from the enabled-but-unmounted 404 state without restarting the backend.
+
 ## 0.7.0 — 2026-08-24
 
 Fleet Graph 0.7.0 is a release-hardening update focused on trustworthy topology

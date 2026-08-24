@@ -5,6 +5,14 @@ CHANGELOG.md
 __init__.py
 dashboard/manifest.json
 dashboard/plugin_api.py
+starter_pack.py
+skills/fleet-bot-advisor/SKILL.md
+skills/fleet-hierarchy-builder/SKILL.md
+starter-packs/index.json
+starter-packs/starfleet-complement/ATTRIBUTION.md
+starter-packs/starfleet-complement/README.md
+starter-packs/starfleet-complement/fleet_graph.example.yaml
+starter-packs/starfleet-complement/pack.yaml
 desktop-plugin/plugin.js
 docs/fleet-command-deck-light.png
 docs/fleet-command-graph-dark.png
@@ -23,6 +31,7 @@ tests/drive-harness.mjs
 tests/helpers/generic-fleet.mjs
 tests/helpers/paths.mjs
 tests/hostile-harness.mjs
+tests/issue3_remount_test.py
 tests/loop2-harness.mjs
 tests/loop5-harness.mjs
 tests/loop6-harness.mjs
@@ -32,4 +41,7 @@ tests/package-lock.json
 tests/package.json
 tests/public_integration_test.py
 tests/public_release_test.py
+tests/starter_pack_test.py
+tests/starter_pack_install_contract_test.py
+tests/workflow_contract_test.py
 tests/render-harness.mjs

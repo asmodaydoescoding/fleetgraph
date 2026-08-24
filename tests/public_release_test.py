@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Iterable, Sequence
 
-EXPECTED_VERSION = "0.7.0"
+EXPECTED_VERSION = "0.8.0"
 ALLOWLIST_PATH = "release/allowlist.txt"
 SELF_PATH = "tests/public_release_test.py"
 TEXT_SUFFIXES = {
@@ -451,7 +451,7 @@ def scan_versions(root: Path, findings: set[Finding]) -> None:
         match = re.search(r"(?m)^\s*version:\s*[\"']?([^\s\"']+)", plugin_text)
         if not match or match.group(1) != EXPECTED_VERSION:
             line = plugin_text[: match.start()].count("\n") + 1 if match else 0
-            add(findings, "version_mismatch", "plugin.yaml", line, "expected-v0.7.0")
+            add(findings, "version_mismatch", "plugin.yaml", line, "expected-v0.8.0")
 
     frontend_text, _ = read_text(root, "desktop-plugin/plugin.js")
     version_literal = re.compile(r"\b[vV]" + re.escape(EXPECTED_VERSION) + r"\b")
@@ -461,7 +461,7 @@ def scan_versions(root: Path, findings: set[Finding]) -> None:
             "version_mismatch",
             "desktop-plugin/plugin.js",
             0,
-            "expected-display-v0.7.0",
+            "expected-display-v0.8.0",
         )
 
     readme_text, _ = read_text(root, "README.md")
@@ -473,7 +473,7 @@ def scan_versions(root: Path, findings: set[Finding]) -> None:
             "version_mismatch",
             "README.md",
             0,
-            "expected-release-v0.7.0",
+            "expected-release-v0.8.0",
         )
 
     manifest_text, _ = read_text(root, "dashboard/manifest.json")
@@ -496,7 +496,7 @@ def scan_versions(root: Path, findings: set[Finding]) -> None:
                 "version_mismatch",
                 "dashboard/manifest.json",
                 0,
-                "expected-v0.7.0",
+                "expected-v0.8.0",
             )
 
 

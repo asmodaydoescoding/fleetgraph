@@ -285,9 +285,9 @@ function useBackendHeal(overviewFailed) {
   const row = useMemo(() => ((check.data?.plugins) || []).find(p =>
     p.key === ID || p.name === ID), [check.data])
   // Three states (issue #3): config-disabled -> offer Enable; enabled but
-  // the API still 404s -> the server predates the enable, only a backend
-  // restart remounts routes; no plugins.manage row (older gateway) or any
-  // other case -> plain error card.
+  // the API still 404s -> ask the live backend to remount its plugin routes;
+  // no plugins.manage row (older gateway) or any other case -> plain error
+  // card.
   const backendDisabled = !!row && row.status !== 'enabled'
   const backendNeedsRestart = !!overviewFailed && !!row && row.status === 'enabled'
   const enable = useMutation({
@@ -298,7 +298,29 @@ function useBackendHeal(overviewFailed) {
     },
     onError: e => host.notify({ kind: 'error', message: String(e?.message || e) }),
   })
-  return { backendDisabled, backendNeedsRestart, enable }
+  const remount = useMutation({
+    mutationFn: async () => {
+      const result = await host.request('plugins.manage', {
+        action: 'reload_dashboard_routes',
+        confirm: true,
+        protocol_version: 1,
+      })
+      if (result?.protocol !== 'fleet-graph.dashboard-routes' || result?.protocol_version !== 1) {
+        throw new Error('Hermes route-remount protocol is unavailable; restart the dashboard once, then press Retry')
+      }
+      return result
+    },
+    onSuccess: result => {
+      qc.invalidateQueries({ queryKey: ['fleet-backend-state'] })
+      qc.invalidateQueries({ queryKey: ['fleet-graph-overview'] })
+      host.notify({
+        kind: 'success',
+        message: `Plugin routes remounted (${result?.count || 0}); retrying the Fleet Graph API.`,
+      })
+    },
+    onError: e => host.notify({ kind: 'error', message: String(e?.message || e) }),
+  })
+  return { backendDisabled, backendNeedsRestart, enable, remount }
 }
 
 /** Edge key for a pair of bots (order-independent). */
@@ -1731,13 +1753,261 @@ function topologyChanged(nodes, draft) {
   return false
 }
 
+// ─── optional starter packs ──────────────────────────────────────
+function StarterPacksPanel({ nodes }) {
+  const qc = useQueryClient()
+  const [openId, setOpenId] = useState(null)
+  const [selected, setSelected] = useState(new Set())
+  const [plan, setPlan] = useState(null)
+  const packsQ = useQuery({
+    queryKey: ['fleet-starter-packs'],
+    queryFn: () => api.rest('/starter-packs'),
+    staleTime: 5 * 60 * 1000,
+  })
+  const previewQ = useQuery({
+    queryKey: ['fleet-starter-pack', openId],
+    queryFn: () => api.rest(`/starter-packs/${openId}`),
+    enabled: !!openId,
+    staleTime: 5 * 60 * 1000,
+  })
+  const review = useMutation({
+    mutationFn: () => api.rest(`/starter-packs/${openId}/selection`, {
+      method: 'POST', body: { profiles: [...selected] },
+    }),
+    onSuccess: setPlan,
+    onError: e => host.notify({ kind: 'error', message: `starter pack review failed: ${String(e?.message || e)}` }),
+  })
+  const install = useMutation({
+    mutationFn: async () => {
+      if (!plan?.profiles?.length || !previewQ.data) throw new Error('select at least one profile')
+      const graph = Object.fromEntries(Object.entries(nodes || {}).map(([name, node]) => [name, {
+        supervisor: node.supervisor ?? null,
+        subordinates: [...(node.subordinates || [])],
+        peers: [...(node.peers || [])],
+      }]))
+      const graphKeyFor = name => Object.entries(nodes || {}).find(([key, node]) =>
+        key === name || node?.profile === name)?.[0] || name
+      const selectedNames = new Set(plan.profiles.map(item => item.name))
+      const createdProfiles = []
+      try {
+        for (const action of plan.profiles) {
+          const topo = previewQ.data.topology?.[action.name] || {}
+          if (action.action === 'create') {
+            await host.request('profiles.create', {
+              name: action.name,
+              clone_from: action.clone_from,
+              description: topo.summary || topo.title || `Fleet Graph member: ${action.name}`,
+            })
+            createdProfiles.push(action.name)
+          }
+          const key = graphKeyFor(action.name)
+          const supervisorName = topo.supervisor
+          const supervisorKey = supervisorName && (
+            selectedNames.has(supervisorName) || graphKeyFor(supervisorName) !== supervisorName
+          ) ? graphKeyFor(supervisorName) : null
+          graph[key] = {
+            ...(graph[key] || {}),
+            supervisor: supervisorKey,
+            subordinates: [...(graph[key]?.subordinates || [])],
+            peers: [...(graph[key]?.peers || [])],
+          }
+          if (supervisorKey) {
+            graph[supervisorKey] = graph[supervisorKey] || { supervisor: null, subordinates: [], peers: [] }
+            graph[supervisorKey].subordinates = [...new Set([
+              ...(graph[supervisorKey].subordinates || []), key,
+            ])]
+          }
+        }
+        await api.rest('/graph', { method: 'PUT', body: { nodes: graph } })
+        return plan.profiles
+      } catch (cause) {
+        const rollbackFailures = []
+        for (const name of createdProfiles.slice().reverse()) {
+          try {
+            await host.request('profiles.delete', { name, confirm: true })
+          } catch (rollbackError) {
+            rollbackFailures.push(`${name}: ${String(rollbackError?.message || rollbackError)}`)
+          }
+        }
+        const remainingProfiles = []
+        if (createdProfiles.length) {
+          try {
+            const inventory = await host.request('profiles.list', { include_sessions: false })
+            const names = new Set((inventory?.profiles || []).map(profile => profile?.name || profile))
+            for (const name of createdProfiles) {
+              if (names.has(name)) remainingProfiles.push(name)
+            }
+          } catch (inventoryError) {
+            rollbackFailures.push(`verification: ${String(inventoryError?.message || inventoryError)}`)
+          }
+        }
+        const residue = [...new Set([...rollbackFailures, ...remainingProfiles.map(name => `${name}: profile remains`)])]
+        const suffix = residue.length
+          ? `; rollback incomplete: ${residue.join(' | ')}`
+          : '; created profiles rolled back and verified absent'
+        throw new Error(`${String(cause?.message || cause)}${suffix}`)
+      }
+    },
+    onSuccess: installed => {
+      qc.invalidateQueries({ queryKey: ['fleet-graph-overview'] })
+      qc.invalidateQueries({ queryKey: ['fleet-starter-pack', openId] })
+      setPlan(null)
+      setSelected(new Set())
+      host.notify({ kind: 'success', message: `${installed.length} starter profile(s) installed/adopted and wired` })
+    },
+    onError: e => host.notify({ kind: 'error', message: `starter pack install failed: ${String(e?.message || e)}` }),
+  })
+
+  const validPacks = (packsQ.data?.packs || []).filter(pack => pack.valid)
+  if (!validPacks.length) return null
+  const preview = previewQ.data
+  const allNames = (preview?.profiles || []).map(profile => profile.name)
+  const toggleAll = () => setSelected(current => current.size === allNames.length ? new Set() : new Set(allNames))
+
+  return jsxs('div', { className: 'mx-4 mb-2 rounded-lg border border-(--ui-stroke-secondary) p-2.5', children: [
+    jsxs('div', { className: 'flex items-center justify-between gap-2', children: [
+      jsxs('div', { children: [
+        jsx('div', { className: 'text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-(--ui-text-secondary)', children: 'optional starter packs' }),
+        jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-secondary)', children: 'data-only templates — preview, select, approve' }),
+      ] }),
+      jsx('div', { className: 'flex gap-1', children: validPacks.map(pack => jsx(Button, {
+        size: 'sm', variant: openId === pack.id ? 'outline' : undefined,
+        onClick: () => { setOpenId(pack.id); setPlan(null); setSelected(new Set()) },
+        children: openId === pack.id ? 'Hide pack' : `Preview ${pack.title}`,
+      }, pack.id)) }),
+    ] }),
+    preview && jsxs('div', { className: 'mt-2 border-t border-(--ui-stroke-secondary) pt-2', children: [
+      jsxs('div', { className: 'flex items-center justify-between gap-2', children: [
+        jsxs('div', { className: 'text-xs', children: [
+          jsx('span', { className: 'font-medium', children: preview.title }),
+          jsx('span', { className: 'ml-2 text-(--ui-text-secondary)', children: `${preview.profiles?.length || 0} profiles · ${preview.license}` }),
+        ] }),
+        jsx('button', { type: 'button', onClick: toggleAll, className: 'text-[0.6875rem] text-(--ui-accent)', children: selected.size === allNames.length ? 'clear all' : 'select all' }),
+      ] }),
+      jsx('div', { className: 'mt-1 max-h-40 overflow-auto rounded border border-(--ui-stroke-secondary) p-1', children:
+        (preview.profiles || []).map(profile => jsx('label', { className: 'flex items-center gap-2 px-1 py-0.5 text-[0.6875rem]', children: [
+          jsx(Checkbox, { checked: selected.has(profile.name), onCheckedChange: checked => setSelected(current => {
+            const next = new Set(current)
+            if (checked) next.add(profile.name)
+            else next.delete(profile.name)
+            return next
+          }) }, `pack-${profile.name}`),
+          jsx('span', { className: 'font-mono', children: profile.name }),
+          jsx('span', { className: 'text-(--ui-text-secondary)', children: profile.installed ? 'adopt' : `create from ${profile.clone_from || 'review'}` }),
+        ] }, profile.name))
+      }),
+      jsxs('div', { className: 'mt-2 flex items-center justify-between gap-2', children: [
+        jsx('span', { className: 'text-[0.625rem] text-(--ui-text-secondary)', children: 'No profile or graph mutation occurs during preview.' }),
+        jsx(Button, { size: 'sm', disabled: !selected.size || review.isPending, onClick: () => review.mutate(), children: review.isPending ? 'reviewing…' : 'Review selected' }),
+      ] }),
+      plan && jsxs('div', { className: 'mt-2 rounded border border-(--ui-accent) p-2', children: [
+        jsx('div', { className: 'text-xs font-medium', children: `Approval required: ${plan.profiles.length} profile(s)` }),
+        jsx('div', { className: 'mt-1 text-[0.6875rem] text-(--ui-text-secondary)', children: plan.profiles.map(item => `${item.name}: ${item.action}${item.clone_from ? ` ← ${item.clone_from}` : ''}`).join(' · ') }),
+        jsx(Button, { className: 'mt-2', size: 'sm', disabled: install.isPending, onClick: () => install.mutate(), children: install.isPending ? 'installing…' : 'Approve & install selected' }),
+      ] }),
+    ] }),
+  ] })
+}
+
+// ─── approval-gated fleet workflows ───────────────────────────────
+function WorkflowPanel({ nodes }) {
+  const qc = useQueryClient()
+  const [mode, setMode] = useState(null)
+  const [hierarchyPlan, setHierarchyPlan] = useState(null)
+  const workflowsQ = useQuery({
+    queryKey: ['fleet-workflows'],
+    queryFn: () => api.rest('/workflows'),
+    staleTime: 5 * 60 * 1000,
+  })
+  const advisorQ = useQuery({
+    queryKey: ['fleet-advisor-preview'],
+    queryFn: () => api.rest('/advisor/preview?days=30'),
+    enabled: mode === 'advisor',
+    staleTime: 30 * 1000,
+  })
+  const insightsQ = useQuery({
+    queryKey: ['fleet-advisor-insights'],
+    queryFn: () => host.request('insights.get', { days: 30 }),
+    enabled: mode === 'advisor',
+    staleTime: 30 * 1000,
+  })
+  const hierarchyPreview = useMutation({
+    mutationFn: () => {
+      const draft = Object.fromEntries(Object.entries(nodes || {}).map(([name, node]) => [name, {
+        supervisor: node.supervisor ?? null,
+        subordinates: [...(node.subordinates || [])],
+        peers: [...(node.peers || [])],
+      }]))
+      return api.rest('/hierarchy/preview', { method: 'POST', body: { nodes: draft } })
+    },
+    onSuccess: setHierarchyPlan,
+    onError: e => host.notify({ kind: 'error', message: `hierarchy preview failed: ${String(e?.message || e)}` }),
+  })
+  const hierarchyApply = useMutation({
+    mutationFn: () => {
+      if (!hierarchyPlan?.after) throw new Error('preview the hierarchy first')
+      const draft = Object.fromEntries(Object.entries(nodes || {}).map(([name, node]) => [name, {
+        supervisor: node.supervisor ?? null,
+        subordinates: [...(node.subordinates || [])],
+        peers: [...(node.peers || [])],
+      }]))
+      return api.rest('/hierarchy/apply', { method: 'PUT', body: { nodes: draft, confirm: true } })
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['fleet-graph-overview'] })
+      setHierarchyPlan(null)
+      host.notify({ kind: 'success', message: 'Approved hierarchy applied atomically' })
+    },
+    onError: e => host.notify({ kind: 'error', message: `hierarchy apply failed: ${String(e?.message || e)}` }),
+  })
+  const workflows = workflowsQ.data?.workflows || []
+  if (!workflows.length) return null
+  const advisor = workflows.find(item => item.id === 'fleet-bot-advisor')
+  const hierarchy = workflows.find(item => item.id === 'fleet-hierarchy-builder')
+  return jsxs('div', { className: 'mx-4 mb-2 rounded-lg border border-(--ui-stroke-secondary) p-2.5', children: [
+    jsxs('div', { className: 'flex items-center justify-between gap-2', children: [
+      jsxs('div', { children: [
+        jsx('div', { className: 'text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-(--ui-text-secondary)', children: 'fleet workflows' }),
+        jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-secondary)', children: 'local signals, review first, explicit approval' }),
+      ] }),
+      jsxs('div', { className: 'flex gap-1', children: [
+        advisor && jsx(Button, { size: 'sm', variant: mode === 'advisor' ? 'outline' : undefined, onClick: () => { setMode(mode === 'advisor' ? null : 'advisor'); setHierarchyPlan(null) }, children: 'Review advisor' }),
+        hierarchy && jsx(Button, { size: 'sm', variant: mode === 'hierarchy' ? 'outline' : undefined, onClick: () => { setMode(mode === 'hierarchy' ? null : 'hierarchy'); setHierarchyPlan(null) }, children: 'Build hierarchy' }),
+      ] }),
+    ] }),
+    mode === 'advisor' && jsxs('div', { className: 'mt-2 border-t border-(--ui-stroke-secondary) pt-2', children: [
+      jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-secondary)', children: 'Advisor observes coarse local counts, summarizes them, recommends a review, and stops before profile creation.' }),
+      jsx('div', { className: 'mt-1 text-xs', children: insightsQ.isLoading ? 'reading coarse activity…' : `last 30 days: ${insightsQ.data?.sessions || 0} sessions · ${insightsQ.data?.messages || 0} messages` }),
+      (advisorQ.data?.recommendations || []).map(item => jsxs('div', { className: 'mt-1 rounded border border-(--ui-stroke-secondary) p-1.5 text-[0.6875rem]', children: [
+        jsx('div', { className: 'font-medium', children: item.reason }),
+        jsx('div', { className: 'text-(--ui-text-secondary)', children: `${item.next_step} Source: ${item.source}` }),
+      ] }, item.id)),
+      jsx('div', { className: 'mt-1 text-[0.625rem] text-(--ui-text-secondary)', children: 'No automatic profile creation. Use the starter-pack review above and approve each selected action yourself.' }),
+    ] }),
+    mode === 'hierarchy' && jsxs('div', { className: 'mt-2 border-t border-(--ui-stroke-secondary) pt-2', children: [
+      jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-secondary)', children: 'Draft changes are validated for cycles, unknown profiles, and duplicate edges before any write.' }),
+      jsx(Button, { className: 'mt-1', size: 'sm', disabled: hierarchyPreview.isPending, onClick: () => hierarchyPreview.mutate(), children: hierarchyPreview.isPending ? 'previewing…' : 'Preview hierarchy diff' }),
+      hierarchyPlan && jsxs('div', { className: 'mt-2 rounded border border-(--ui-accent) p-2', children: [
+        jsx('div', { className: 'text-xs font-medium', children: `${hierarchyPlan.changed_profiles?.length || 0} profile(s) in draft diff` }),
+        jsx('div', { className: 'mt-1 text-[0.6875rem] text-(--ui-text-secondary)', children: (hierarchyPlan.changed_profiles || []).join(' · ') || 'No topology changes detected.' }),
+        jsx(Button, { className: 'mt-2', size: 'sm', disabled: hierarchyApply.isPending || !hierarchyPlan.valid, onClick: () => hierarchyApply.mutate(), children: hierarchyApply.isPending ? 'applying…' : 'Approve & apply hierarchy' }),
+      ] }),
+    ] }),
+  ] })
+}
+
 // ─── page ────────────────────────────────────────────────────────
 function FleetGraphPage() {
   useTokens()
   const qc = useQueryClient()
   const q = useOverview()
   const trafficIdx = useTrafficIndex()
-  const { backendDisabled, backendNeedsRestart, enable: enableBackend } = useBackendHeal(q.isError)
+  const {
+    backendDisabled,
+    backendNeedsRestart,
+    enable: enableBackend,
+    remount: remountRoutes,
+  } = useBackendHeal(q.isError)
   const [selected, setSelected] = useState(null)
   const [draft, setDraft] = useState(null)
   const [creating, setCreating] = useState(false)
@@ -1891,7 +2161,7 @@ function FleetGraphPage() {
         description: backendDisabled
           ? 'The UI loaded, but its Python API is switched off in config.yaml (plugins.enabled). Enable it below — or add "fleet-graph" to plugins.enabled manually.'
           : backendNeedsRestart
-            ? 'config.yaml already lists this plugin, but the running Hermes backend started before it was enabled — plugin API routes only mount at startup. Quit and reopen the Hermes desktop app once (or restart hermes serve / the dashboard service), then press Retry.'
+            ? 'config.yaml already lists this plugin, but the running Hermes backend did not mount its API routes. Remount them below; if this Hermes version lacks live remount support, restart the dashboard once and press Retry.'
             : String(q.error?.message || q.error || 'the backend did not answer'),
       }),
       backendDisabled && jsx('div', { className: 'flex justify-center', children:
@@ -1899,6 +2169,13 @@ function FleetGraphPage() {
           disabled: enableBackend.isPending,
           onClick: () => enableBackend.mutate(),
           children: enableBackend.isPending ? 'enabling…' : 'Enable backend'
+        })
+      }),
+      backendNeedsRestart && jsx('div', { className: 'flex justify-center', children:
+        jsx(Button, {
+          disabled: remountRoutes.isPending,
+          onClick: () => remountRoutes.mutate(),
+          children: remountRoutes.isPending ? 'remounting…' : 'Remount routes'
         })
       }),
       jsx('div', { className: 'flex justify-center mt-2', children:
@@ -2000,7 +2277,7 @@ function FleetGraphPage() {
     jsxs('div', { className: 'flex items-center gap-3 px-4 pt-3 pb-2 border-b border-(--ui-stroke-secondary)', children: [
       jsxs('div', { className: 'flex items-baseline gap-2', children: [
         jsx('div', { className: 'text-base font-semibold', children: 'Fleet Command' }),
-        jsx('span', { className: 'rounded-full border border-(--ui-stroke-secondary) px-1.5 text-[0.5625rem] font-mono uppercase tracking-wider text-(--ui-text-secondary)', children: 'v0.7.0' }),
+        jsx('span', { className: 'rounded-full border border-(--ui-stroke-secondary) px-1.5 text-[0.5625rem] font-mono uppercase tracking-wider text-(--ui-text-secondary)', children: 'v0.8.0' }),
       ] }),
       // view switch — Deck (command center) / Graph (topology drawing)
       jsx(SegmentedControl, {
@@ -2034,6 +2311,8 @@ function FleetGraphPage() {
         children: '+ New member'
       })
     ] }),
+    jsx(StarterPacksPanel, { nodes }),
+    jsx(WorkflowPanel, { nodes }),
     // search + status filter row (tree view only)
     view === 'tree' && jsxs('div', { className: 'flex items-center gap-2 px-4 pb-1.5', children: [
       jsx(Input, {

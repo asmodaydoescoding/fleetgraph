@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "packs": [
+    {
+      "id": "starfleet-complement",
+      "version": "1.0.0",
+      "title": "Starfleet Complement",
+      "description": "A 75-node command fleet organized across command, science, engineering, security, medical, ethics, and red-team divisions.",
+      "path": "starfleet-complement/pack.yaml",
+      "optional": true,
+      "requires_external_profiles": true,
+      "source_profiles": "https://github.com/teknium1/hermes-star-trek-profiles",
+      "topology_nodes": 75,
+      "profile_collection_size": 68,
+      "license": "MIT",
+      "credits": [
+        {
+          "role": "original profile collection",
+          "name": "Teknium",
+          "handle": "teknium1",
+          "url": "https://github.com/teknium1/hermes-star-trek-profiles"
+        },
+        {
+          "role": "Fleet Graph topology and PR author",
+          "name": "Baal-TehDriverman",
+          "handle": "TheDriverMan",
+          "url": "https://github.com/asmodaydoescoding/fleetgraph/pull/5"
+        }
+      ]
+    }
+  ]
+}
