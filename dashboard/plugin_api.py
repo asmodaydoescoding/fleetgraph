@@ -426,6 +426,13 @@ def match(q: str, top: int = 3):
 
 
 def _inbox_file(name: str) -> Path:
+    # Graph nodes may be display aliases for canonical Hermes profiles. Inbox
+    # storage follows the canonical profile so UI sends and profile drains meet
+    # at the same file.
+    try:
+        name = resolve_profile(name)
+    except (GraphError, OSError):
+        pass
     return INBOX_DIR / f"{name}.jsonl"
 
 
@@ -535,15 +542,15 @@ def fleet_send(msg: FleetSend):
                 "the default profile is not represented in the graph — "
                 "add it directly or configure _meta.profile_aliases",
             )
-        recipient = target
+        recipient = resolve_profile(target)
         ok, why = can_communicate(graph, sender_name, target, relations)
     elif msg.kind == "supervisor":
         # operator speaking AS this bot upward: find its supervisor
         sup = graph.get(target, {}).get("supervisor")
         if not sup:
             raise HTTPException(422, f"'{target}' has no supervisor to escalate to")
-        sender_name, recipient = target, sup
-        ok, why = can_communicate(graph, sender_name, recipient, relations)
+        sender_name, recipient = target, resolve_profile(sup)
+        ok, why = can_communicate(graph, sender_name, sup, relations)
     else:  # talk — operator relays a peer conversation opener from this bot
         peers = [p for p in relations.get(target, [])]
         if not peers:
@@ -554,8 +561,8 @@ def fleet_send(msg: FleetSend):
         wanted = (msg.recipient or "").strip()
         if wanted and wanted not in peers:
             raise HTTPException(422, f"'{wanted}' is not a peer of '{target}'")
-        sender_name, recipient = target, (wanted or peers[0])
-        ok, why = can_communicate(graph, sender_name, recipient, relations)
+        sender_name, recipient = target, resolve_profile(wanted or peers[0])
+        ok, why = can_communicate(graph, sender_name, wanted or peers[0], relations)
 
     if not ok:
         raise HTTPException(422, f"edge refused: {why}")
@@ -601,6 +608,10 @@ def _read_inbox(name: str) -> list[dict]:
 
 
 def _watermark_file(name: str) -> Path:
+    try:
+        name = resolve_profile(name)
+    except (GraphError, OSError):
+        pass
     try:
         WATERMARK_DIR.mkdir(parents=True, exist_ok=True)
     except (OSError, FileExistsError):

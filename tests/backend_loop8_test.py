@@ -93,6 +93,23 @@ with tempfile.TemporaryDirectory(prefix="fleet-loop8-backend-") as td:
           f"put={update.status_code} send={stale_send.status_code} body={stale_send.text[:160]}")
     check("refused stale recipient writes no inbox", before_files == after_files)
 
+    # Graph-facing aliases must not become filesystem inbox names. A supervisor
+    # send to the `captain` alias represents the canonical `default` profile.
+    alias_send = client.post(f"{base}/send", json={
+        "to": "relay-hub", "kind": "supervisor", "text": "alias delivery check",
+    })
+    check("alias supervisor send resolves canonical recipient",
+          alias_send.status_code == 200 and alias_send.json().get("recipient") == "default",
+          f"status={alias_send.status_code} body={alias_send.text[:200]}")
+    check("alias supervisor send lands in canonical inbox",
+          (inbox / "default.jsonl").is_file() and not (inbox / "captain.jsonl").is_file(),
+          f"files={sorted(p.name for p in inbox.glob('*.jsonl'))}")
+    alias_read = client.get(f"{base}/inbox/captain")
+    check("alias inbox read resolves canonical messages",
+          alias_read.status_code == 200 and
+          any(m.get("summary") == "alias delivery check" for m in alias_read.json().get("messages", [])),
+          f"status={alias_read.status_code} body={alias_read.text[:200]}")
+
     # Simulate the built-in Bots/Profiles delete: the profile directory is
     # removed outside this plugin while the separate topology file is stale.
     (profiles / "purge-me").rmdir()
@@ -110,8 +127,8 @@ with tempfile.TemporaryDirectory(prefix="fleet-loop8-backend-") as td:
           f"graph={sorted(stale_readd['graph'])}")
 
     # Explicit hierarchy removal removes only the graph node. The profile
-    # directory remains available for later re-import, while the parent edge
-    # is updated in the same atomic request.
+    # directory remains available for later adoption or manual reattachment,
+    # while the parent edge is updated in the same atomic request.
     remove_response = client.put(f"{base}/graph", json={
         "nodes": {"captain": {"subordinates": ["relay-hub", "webpbot", "dirbot"]}},
         "relations": {}, "remove": ["pngbot"],

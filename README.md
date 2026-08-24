@@ -15,7 +15,7 @@ and tails each bot's activity without opening a single terminal.
   the cursor), and click any bot to open its live transcript drawer. A valid
   operator viewport persists across sessions and is never overwritten by the
   mount default.
-- **Deck view (v0.6.1 Fleet Command)** — team-grouped card deck: NEEDS
+- **Deck view (v0.7.0 Fleet Command)** — team-grouped card deck: NEEDS
   ATTENTION triage pile, TEAMS (one header per supervisor with capability),
   UNASSIGNED with "attach under…" selects. Cards carry identity + capability
   line (from the roster), a status chip (`conversing` / `ready 2h` /
@@ -28,7 +28,7 @@ and tails each bot's activity without opening a single terminal.
   Conversing / Idle / Needs attention. Deck and Graph share the same live
   topology draft, so an unsaved rewire is visible in both views immediately.
   The bottom save bar commits all draft edits as one atomic PUT.
-- **Message composer (v0.6.1)** — open a framed conversation with any bot from
+- **Message composer (v0.7.0)** — open a framed conversation with any bot from
   its inspector: `talk` (bot → a peer; when it has several peers, pick the
   recipient — validated server-side against the peer list, so edges can't be
   faked), `delegate` (orchestrator → bot; the receiving bot splits work
@@ -51,12 +51,16 @@ and tails each bot's activity without opening a single terminal.
 - **Rewire inline** — change supervisors, attach/detach reports, add/remove
   peer relations; draft edits save atomically via one PUT. In Configure,
   **remove from hierarchy** removes a leaf/root graph node while retaining
-  its profile folder for later re-import; members with reports must be moved
+  its profile folder for later adoption or manual reattachment; members with
   first, and **demote to root** remains available through the supervisor
   picker.
-- **Create members** — full dialog mirroring Bots "New Agent": SOUL.md at
-  birth, model picker, skills + toolsets checklists applied via
-  profiles.configure.
+- **Create and adopt members** — full dialog mirroring Bots "New Agent":
+  SOUL.md, description, model, skills + toolsets at birth. New members can
+  clone any existing Hermes profile from the canonical profile inventory;
+  cloning passes `clone_from` through `profiles.create` so the source config,
+  skills, and persona are copied by Hermes itself. If a profile already exists
+  but is not wired into Fleet Graph, **Adopt & wire in** attaches it without
+  recreating it and applies only the explicit edits made in the dialog.
 - **SOUL editing** — per-bot SOUL.md editor (default profile protected).
 - **Semantic routing** — `GET /api/plugins/fleet-graph/match?q=<task>&top=N`
   ranks the fleet by capability similarity (local fastembed embeddings,
@@ -76,8 +80,9 @@ otherwise stay silent.
 
 ## Known limitations
 
-- Profile **deletion does not prune** `fleet_graph.yaml`, inboxes, or
-  watermarks — remove stale entries manually (or via a PUT) today.
+- Profile **deletion does not prune** inboxes or read watermarks — graph nodes,
+  hierarchy edges, and relation choices are reconciled automatically; stale
+  inbox/watermark files remain for manual retention or cleanup.
 - Concurrent graph PUTs are serialized by a cross-process file lock and
   **merge** over the stored topology: nodes absent from the payload keep
   their state, removals require an explicit `remove: [name]` list, and

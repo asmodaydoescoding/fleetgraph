@@ -1,6 +1,7 @@
 .gitignore
 LICENSE
 README.md
+CHANGELOG.md
 __init__.py
 dashboard/manifest.json
 dashboard/plugin_api.py

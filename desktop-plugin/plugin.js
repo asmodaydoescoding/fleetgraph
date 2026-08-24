@@ -30,6 +30,7 @@ import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
 import ReactDefault, { useEffect, useMemo, useRef, useState } from 'react'
 
 const ID = 'fleet-graph'
+const PROFILE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 let api = null // the plugin ctx, bound in register()
 
 // ─── design tokens (Astryx-derived) ───────────────────────────────
@@ -593,6 +594,11 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
     enabled: showAdvanced,
     staleTime: 60000,
   })
+  const profilesQ = useQuery({
+    queryKey: ['fleet-create-profiles'],
+    queryFn: () => host.request('profiles.list', { include_sessions: false }),
+    staleTime: 30000,
+  })
   const modelChoices = useMemo(() => {
     if (!modelQ.data?.providers) return []
     const flat = []
@@ -629,18 +635,39 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
   const profileNames = Array.isArray(existingProfiles)
     ? existingProfiles
     : Object.entries(existingProfiles || {}).map(([graphName, node]) => node?.profile || graphName)
-  const knownNames = useMemo(() => new Set(profileNames), [existingProfiles])
-  // duplicate name: no longer a blocker — Create ADOPTS the existing profile
-  // (skips creation, still applies persona/capabilities and graph wiring).
-  // This is the repair path for a half-created member: profiles.create
-  // succeeded earlier but the graph write failed (e.g. backend was disabled),
-  // leaving a profile with no node.
+  const inventoryProfiles = Array.isArray(profilesQ.data?.profiles)
+    ? profilesQ.data.profiles
+    : []
+  const inventoryNames = inventoryProfiles
+    .map(p => p?.name || p)
+    .filter(name => typeof name === 'string' && PROFILE_ID_RE.test(name))
+  const graphNamesForClone = profileNames
+    .filter(name => typeof name === 'string' && PROFILE_ID_RE.test(name))
+  const knownNames = useMemo(() => new Set([
+    ...graphNamesForClone,
+    ...inventoryNames,
+  ]), [existingProfiles, profilesQ.data])
+  const cloneProfiles = [...new Set([
+    ...inventoryNames,
+    ...graphNamesForClone,
+  ])]
+  // Any Hermes profile with the requested name is adopted rather than
+  // recreated. Profiles that are not graph members can still be clone sources.
   const dupe = valid && knownNames.has(slug)
-  // name typed but slug unusable (e.g. all punctuation): explain why Create is off
   const nameInvalid = name.trim().length > 0 && !valid
   const create = useMutation({
     mutationFn: async () => {
       const picked = modelChoice ? modelChoices.find(c => `${c.provider}\u0000${c.model}` === modelChoice) : undefined
+      const capPayload = {}
+      if (showAdvanced) {
+        const disabled = (skills || []).filter(s => !selectedSkills.has(s.name)).map(s => s.name)
+        if (disabled.length) capPayload.disabled_skills = disabled
+
+        const enabledTs = [...selectedToolsets]
+        if (enabledTs.length && enabledTs.length < (toolsets || []).length) {
+          capPayload.enabled_toolsets = enabledTs
+        }
+      }
 
       // existing profile -> adopt it instead of failing on profiles.create
       if (!knownNames.has(slug)) {
@@ -654,18 +681,20 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
         })
 
         // apply skill/toolset picks via profiles.configure (replace semantics)
-        const capPayload = {}
-        if (showAdvanced) {
-          const disabled = (skills || []).filter(s => !selectedSkills.has(s.name)).map(s => s.name)
-          if (disabled.length) capPayload.disabled_skills = disabled
-
-          const enabledTs = [...selectedToolsets]
-          if (enabledTs.length && enabledTs.length < (toolsets || []).length) {
-            capPayload.enabled_toolsets = enabledTs
-          }
-        }
         if (Object.keys(capPayload).length) {
           await host.request('profiles.configure', { name: slug, ...capPayload })
+        }
+      } else {
+        const profilePayload = { name: slug }
+        if (description.trim()) profilePayload.description = description.trim()
+        if (soul.trim()) profilePayload.soul = soul
+        if (picked) {
+          profilePayload.provider = picked.provider
+          profilePayload.model = picked.model
+        }
+        Object.assign(profilePayload, capPayload)
+        if (Object.keys(profilePayload).length > 1) {
+          await host.request('profiles.configure', profilePayload)
         }
       }
 
@@ -694,7 +723,6 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
   })
 
   const allGraphNames = [...graphNames, slug].filter(Boolean)
-  const cloneProfiles = [...new Set(profileNames.filter(Boolean))]
 
   return jsxs(Dialog, {
     open: true, onOpenChange: o => { if (!o) onClose() },
@@ -1972,7 +2000,7 @@ function FleetGraphPage() {
     jsxs('div', { className: 'flex items-center gap-3 px-4 pt-3 pb-2 border-b border-(--ui-stroke-secondary)', children: [
       jsxs('div', { className: 'flex items-baseline gap-2', children: [
         jsx('div', { className: 'text-base font-semibold', children: 'Fleet Command' }),
-        jsx('span', { className: 'rounded-full border border-(--ui-stroke-secondary) px-1.5 text-[0.5625rem] font-mono uppercase tracking-wider text-(--ui-text-secondary)', children: 'v0.6.1' }),
+        jsx('span', { className: 'rounded-full border border-(--ui-stroke-secondary) px-1.5 text-[0.5625rem] font-mono uppercase tracking-wider text-(--ui-text-secondary)', children: 'v0.7.0' }),
       ] }),
       // view switch — Deck (command center) / Graph (topology drawing)
       jsx(SegmentedControl, {
