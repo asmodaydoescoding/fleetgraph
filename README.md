@@ -171,7 +171,7 @@ Do not install `tests/` dependencies.
 
 ### Preferred agent/CLI install
 
-Use Hermes' plugin installer instead of copying an archive by hand. This keeps
+Use Hermes to install the plugin instead of copying an archive by hand. This keeps
 the plugin under the correct Hermes home, runs Hermes' install-time security
 scan, records the source/revision, and enables the backend explicitly.
 
