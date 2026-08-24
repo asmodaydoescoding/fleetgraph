@@ -78,6 +78,9 @@ recovery paths.
   changes even when message counts stay constant.
 - Create-flow and host harnesses now match the current plugin SDK and exercise
   adoption behavior instead of only checking the dialog label.
+- Corrected desktop loader documentation and static verification to match
+  Hermes' syntax-anchored ESM import matcher, including its compatibility rule
+  against import-declaration-shaped text in plugin comments and strings.
 - Public release checks enforce one version across the plugin manifest, desktop
   badge, dashboard manifest, README, and release payload.
 - Generated test dependencies and temporary files are excluded from release

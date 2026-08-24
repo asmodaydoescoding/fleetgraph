@@ -12,11 +12,11 @@
  * message.start/complete events stamped with `event.profile` — used to paint
  * per-node "thinking / running X / idle" status without a per-bot socket.
  *
- * LOADER CONSTRAINT: the runtime loader scans this file for bare import
- * specifiers with a naive regex that also matches those two module keywords
- * when followed by a quote character (backtick included) ANYWHERE — string
- * literals and comments included. Never write either keyword adjacent to a
- * quote outside real import statements.
+ * LOADER CONTRACT: Hermes Desktop extracts module specifiers with a
+ * syntax-anchored matcher, not a full JavaScript parser. Keep module imports
+ * limited to the SDK and React surfaces supported by the host, and avoid
+ * import-declaration-shaped examples in comments or strings. The repository
+ * audit checks the exact loader-shaped import count.
  */
 import {
   cn, host, useMutation, useQuery, useQueryClient,

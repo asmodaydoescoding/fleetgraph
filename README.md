@@ -331,15 +331,16 @@ gate.
 - Whether to optimize or virtualize the graph beyond the verified 26-node
   range.
 
-## Loader constraint (for editors)
+## Loader contract (for editors)
 
-The desktop runtime loader scans plugin source with a naive regex that
-treats the two module keywords followed by any quote as import specifiers.
-Never write those keywords adjacent to quotes outside the real import
-statements at the top of `plugin.js`. Verify after edits:
+The published Hermes Desktop loader uses a syntax-anchored matcher for
+static, side-effect, and dynamic ESM imports; it is not a full JavaScript
+parser. Keep module imports limited to the host-supported SDK and React
+surfaces, and avoid placing import-declaration-shaped examples in plugin
+comments or strings. Verify after edits:
 
 ```bash
 node --check desktop-plugins/fleet-graph/plugin.js
-# loader regex sweep must report exactly the real imports:
-grep -cE "(from|import)[\"']" desktop-plugins/fleet-graph/plugin.js || true
+python3 tests/a1_audit.py
+# Expected: PARSE OK, loader imports: 3, token/key findings: 0
 ```
