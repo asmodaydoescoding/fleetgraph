@@ -4,7 +4,7 @@
 //   2. talk frame with multiple peers shows a REAL recipient picker and the
 //      choice is transmitted to /send (was: picker ignored, backend got peers[0])
 //   3. supervisor frame resolves upward; no client recipient sent
-//   4. Send disabled on empty text; result line renders delivery echo
+//   4. Send disabled on empty text; result line renders queued activation
 //   5. peer-less bot: talk frame shows reachability hint, Send stays disabled
 // Paths come from the shared portable helper, so any checkout runs this
 // harness unmodified. Fixtures come from the shared generic-fleet builders
@@ -37,7 +37,7 @@ function restStub(path, opts = {}) {
   if (path.startsWith('/sessions/tail')) return Promise.resolve({ sessions: {} })
   if (path.startsWith('/send')) {
     lastSendBody = opts.body
-    return Promise.resolve({ ok: true, sender: 'x', recipient: opts.body.recipient || (opts.body.kind === 'delegate' ? opts.body.to : 'resolved'), frame: opts.body.kind, edge: 'peer' })
+    return Promise.resolve({ ok: true, sender: 'x', recipient: opts.body.recipient || (opts.body.kind === 'delegate' ? opts.body.to : 'resolved'), frame: opts.body.kind, edge: 'peer', delivery: { mode: 'live', state: 'queued' } })
   }
   return Promise.resolve({})
 }
@@ -155,7 +155,7 @@ check('composer mounted (frame picker visible)', txt().includes('frame') && txt(
 const selects = () => renderer.root.findAll(i => i.type === 'select' && i.props['data-composer-select'])
 const frameSelect = () => selects().find(s => s.findAll(o => o.type === 'option' && o.props.value === 'talk').length > 0)
 const recipientSelect = () => selects().find(s => s.findAll(o => o.type === 'option' && o.props.value === 'research').length > 0)
-const sendBtn = () => renderer.root.findAll(i => i.type === 'button' && flatJson(i).join(' ').includes('Send to inbox'))[0]
+const sendBtn = () => renderer.root.findAll(i => i.type === 'button' && flatJson(i).join(' ').includes('Start conversation'))[0]
 
 // 1. talk (default frame) with TWO peers -> real recipient picker with both peers
 check('talk frame shows recipient picker (2 peers)', !!recipientSelect(),
@@ -180,9 +180,9 @@ check('Send enabled after recipient pick', sendBtn()?.props.disabled === false)
 lastSendBody = null
 await act(async () => { sendBtn().props.onClick() })
 check('talk send transmits chosen recipient (research)',
-  lastSendBody && lastSendBody.kind === 'talk' && lastSendBody.recipient === 'research' && lastSendBody.to === 'planner',
+  lastSendBody && lastSendBody.kind === 'talk' && lastSendBody.live === true && lastSendBody.recipient === 'research' && lastSendBody.to === 'planner',
   JSON.stringify(lastSendBody))
-check('result line echoes delivery', txt().includes('delivered → research'), txt().match(/delivered[^|]*/)?.[0] || 'no echo')
+check('result line echoes queued activation', txt().includes('queued → research'), txt().match(/queued[^|]*/)?.[0] || 'no queued label')
 
 // 5. switch to the OTHER peer -> recipient follows the picker (onSuccess
 //    cleared the text, so retype first)

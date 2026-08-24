@@ -156,5 +156,5 @@ def register(ctx) -> None:
         "fleet-graph",
         _section,
         position="after_memory",
-        max_chars=6000,
+        max_chars=4000,
     )

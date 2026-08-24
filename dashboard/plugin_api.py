@@ -20,7 +20,11 @@ import datetime
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -43,6 +47,8 @@ INBOX_DIR = Path(os.environ.get("FLEET_INBOX_DIR", str(HERMES / "fleet-inbox")))
 PROFILES_DIR = Path(os.environ.get("FLEET_PROFILES_DIR", str(HERMES / "profiles"))).expanduser()
 WATERMARK_DIR = INBOX_DIR / ".read"
 STARTER_PACKS_DIR = _HERE.parent / "starter-packs"
+HERMES_BIN = os.environ.get("FLEET_HERMES_BIN") or shutil.which("hermes") or "hermes"
+_LIVE_TURN_TIMEOUT_S = 600
 
 router = APIRouter()
 
@@ -662,15 +668,21 @@ def match(q: str, top: int = 3):
     }
 
 
-def _inbox_file(name: str) -> Path:
-    # Graph nodes may be display aliases for canonical Hermes profiles. Inbox
-    # storage follows the canonical profile so UI sends and profile drains meet
-    # at the same file.
+def _storage_profile(name: str) -> str:
+    """Return the canonical on-disk profile name for a graph-facing name."""
     try:
-        name = resolve_profile(name)
-    except (GraphError, OSError):
-        pass
-    return INBOX_DIR / f"{name}.jsonl"
+        canonical = resolve_profile(str(name).strip())
+    except Exception:
+        canonical = str(name).strip()
+    if (not canonical or canonical != os.path.basename(canonical) or
+            canonical in (".", "..") or
+            len(canonical.encode("utf-8", "surrogatepass")) > 255):
+        return "__invalid_profile__"
+    return canonical
+
+
+def _inbox_file(name: str) -> Path:
+    return INBOX_DIR / f"{_storage_profile(name)}.jsonl"
 
 
 def _recent_traffic(window_s: int = 300) -> list[dict]:
@@ -695,6 +707,7 @@ def _recent_traffic(window_s: int = 300) -> list[dict]:
                     rec = json.loads(line)
                 except Exception:
                     continue
+                to_name = rec.get("to") or f.stem
                 ts = _parse_ts(rec.get("ts") or "")
                 if ts and ts >= cutoff:
                     out.append({
@@ -725,7 +738,58 @@ class FleetSend(BaseModel):
     # supervisor (those directions are resolved from the graph). Validated
     # against the target's peer list so it can't spoof an edge.
     recipient: str | None = None
+    # The UI can explicitly boot the receiving Bot Chat turn. The inbox write
+    # remains unconditional, so a queued/failed live turn never loses the
+    # durable message. CLI fleet-msg stays inbox-first unless --deliver is used.
+    live: bool = False
 
+
+def _queue_live_turn(target: str, body: str) -> dict:
+    """Start a non-blocking Bot Chat turn for a graph-initiated message.
+
+    The inbox is the durable transport; this is the activation layer that was
+    missing from the graph composer. The query file survives until the child
+    exits, and a daemon reaper prevents temp-file leaks after normal completion
+    or a timeout. Return a state contract rather than claiming completion.
+    """
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+        f.write(body)
+        query_path = f.name
+    try:
+        proc = subprocess.Popen(
+            [HERMES_BIN, "-p", target, "chat", "--in", "~", "-c", "Bot Chat",
+             "--create-if-missing", "-Q", "--query-file", query_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        try:
+            Path(query_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+        return {"state": "failed", "reason": "Bot Chat process could not be started"}
+
+    def reap() -> None:
+        try:
+            proc.wait(timeout=_LIVE_TURN_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        finally:
+            try:
+                Path(query_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    threading.Thread(target=reap, name=f"fleet-live-{target}", daemon=True).start()
+    return {"state": "queued", "pid": proc.pid}
 
 # The only frames the FLEET-TALK prompt section knows how to resolve. Anything
 # else would land in an inbox as a frame no bot can interpret — reject early.
@@ -762,6 +826,7 @@ def fleet_send(msg: FleetSend):
         raise HTTPException(500, f"fleet graph unusable: {e}")
 
     recipient = DEFAULT_PROFILE
+    recipient_node = ""
     # 'to' names the TARGET bot; sender is resolved from the relationship:
     # delegate/supervisor imply direction, so we compute who talks to whom
     # from the graph rather than trusting the client.
@@ -779,14 +844,17 @@ def fleet_send(msg: FleetSend):
                 "the default profile is not represented in the graph — "
                 "add it directly or configure _meta.profile_aliases",
             )
-        recipient = resolve_profile(target)
+        recipient_node = target
+        recipient = resolve_profile(recipient_node)
         ok, why = can_communicate(graph, sender_name, target, relations)
     elif msg.kind == "supervisor":
         # operator speaking AS this bot upward: find its supervisor
         sup = graph.get(target, {}).get("supervisor")
         if not sup:
             raise HTTPException(422, f"'{target}' has no supervisor to escalate to")
-        sender_name, recipient = target, resolve_profile(sup)
+        sender_name = target
+        recipient_node = sup
+        recipient = resolve_profile(recipient_node)
         ok, why = can_communicate(graph, sender_name, sup, relations)
     else:  # talk — operator relays a peer conversation opener from this bot
         peers = [p for p in relations.get(target, [])]
@@ -798,31 +866,43 @@ def fleet_send(msg: FleetSend):
         wanted = (msg.recipient or "").strip()
         if wanted and wanted not in peers:
             raise HTTPException(422, f"'{wanted}' is not a peer of '{target}'")
-        sender_name, recipient = target, resolve_profile(wanted or peers[0])
-        ok, why = can_communicate(graph, sender_name, wanted or peers[0], relations)
+        recipient_node = wanted or peers[0]
+        sender_name, recipient = target, resolve_profile(recipient_node)
+        ok, why = can_communicate(graph, sender_name, recipient_node, relations)
 
     if not ok:
         raise HTTPException(422, f"edge refused: {why}")
 
     INBOX_DIR.mkdir(parents=True, exist_ok=True)
-    inbox = INBOX_DIR / f"{recipient}.jsonl"
+    inbox = _inbox_file(recipient)
     rec = {
         "ts": _now_iso(),
         "from": sender_name,
+        "to": recipient_node,
         "type": msg.kind,
         "frame": msg.kind,
+        "live_requested": msg.live,
         "summary": msg.text[:500],
     }
     with open(inbox, "a") as f:
         f.write(json.dumps(rec) + "\n")
 
+    delivery = {"mode": "inbox", "state": "recorded"}
+    if msg.live:
+        live_body = (
+            "FLEET MESSAGE — resolve this through the Fleet chain of command.\n"
+            f"sender: {sender_name}\nrecipient: {recipient_node}\nframe: {msg.kind}\n\n"
+            f"{msg.text.strip()}\n\nEND FLEET MESSAGE"
+        )
+        delivery = {"mode": "live", **_queue_live_turn(_storage_profile(recipient), live_body)}
+
     return {
         "ok": True, "edge": why,
         "sender": sender_name, "recipient": recipient,
-        "frame": msg.kind, "hint": (
-            f"{recipient} will see this framed as {msg.kind} from {sender_name}. "
-            f"It decides to answer coworkers, invoke its supervisor, or delegate "
-            f"based on the initiative ladder in its next session."
+        "frame": msg.kind, "delivery": delivery, "hint": (
+            f"{recipient_node} received a framed {msg.kind} message from {sender_name}. "
+            + ("Its Bot Chat turn is queued now." if msg.live else
+               "It will be handled on its next session.")
         ),
     }
 
@@ -846,7 +926,7 @@ def _read_inbox(name: str) -> list[dict]:
 
 def _watermark_file(name: str) -> Path:
     try:
-        name = resolve_profile(name)
+        name = _storage_profile(name)
     except (GraphError, OSError):
         pass
     try:
@@ -888,6 +968,14 @@ def _inbox_counts() -> dict[str, int]:
                 counts[f.stem] = sum(1 for line in f.read_text().splitlines() if line.strip())
             except Exception:
                 counts[f.stem] = 0
+    # The UI addresses graph nodes; storage uses canonical profile names.
+    # Mirror canonical counts onto aliases without creating duplicate files.
+    try:
+        for graph_name in load_graph():
+            canonical = _storage_profile(graph_name)
+            counts[graph_name] = counts.get(canonical, counts.get(graph_name, 0))
+    except GraphError:
+        pass
     return counts
 
 

@@ -90,8 +90,9 @@ and an operator-facing place to build and run the whole system.
   faked), `delegate` (orchestrator → bot; the receiving bot splits work
   downward itself per the initiative ladder), `supervisor` (bot → its
   supervisor). Recipients resolve server-side from the live graph; empty text
-  and unknown frames are refused (422). Delivery is inbox-only — no live-turn
-  boot from UI clicks.
+  and unknown frames are refused (422). UI sends queue the recipient's Bot Chat
+  turn asynchronously and always retain a durable inbox audit copy; a failed
+  live start is reported explicitly rather than faked as completion.
 - **Live activity** — status dot per bot (`complete` / in-progress /
   `interrupted`) from its latest session, plus gateway-event pulses while a
   bot is actively working. Completed gateway turns invalidate the selected
@@ -337,7 +338,7 @@ No credentials are read, no network calls leave the machine.
 | `GET /workflows` · `GET /advisor/preview` | Shipped workflow descriptors and coarse advisor review |
 | `POST /hierarchy/preview` | Validate a staged hierarchy and return a read-only diff |
 | `PUT /hierarchy/apply` | Apply a hierarchy only with explicit `confirm: true` |
-| `POST /send` | Validated `talk` / `delegate` / `supervisor` inbox delivery |
+| `POST /send` | Validated `talk` / `delegate` / `supervisor` delivery; `live: true` queues recipient Bot Chat while preserving the inbox copy |
 
 ## Development
 
@@ -363,6 +364,7 @@ Integration and backend suites:
 ```bash
 python3 tests/public_integration_test.py       # hermetic end-to-end suite; expect INTEGRATION SUMMARY with 0 failed
 python3 tests/backend_loop8_test.py            # expect BACKEND LOOP8 SUMMARY: 23 passed, 0 failed
+python3 tests/communication_live_test.py        # expect COMMUNICATION LIVE SUMMARY: 12 passed, 0 failed
 python3 tests/configurability_test.py          # expect CONFIGURABILITY SUMMARY: 21 passed, 0 failed
 ```
 
