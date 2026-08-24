@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import yaml
 from pathlib import Path
 
@@ -197,8 +198,21 @@ def save_graph(graph: dict, relations: dict | None = None) -> dict:
             yaml.safe_dump(doc, f, sort_keys=True, default_flow_style=False)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_path, GRAPH_PATH)
-        tmp_path = None
+        # Windows: concurrent os.replace() to the same destination raises
+        # PermissionError (WinError 5) because NTFS rename is exclusive on the
+        # target file. Retry with exponential backoff so concurrent savers
+        # serialize on the rename instead of crashing. No-op on POSIX where
+        # this never triggers.
+        for attempt, delay in enumerate((0.05, 0.1, 0.2, 0.4, 0.8)):
+            try:
+                os.replace(tmp_path, GRAPH_PATH)
+                tmp_path = None
+                break
+            except (PermissionError, OSError):
+                if attempt < 4:
+                    time.sleep(delay)
+                else:
+                    raise
     finally:
         if tmp_path is not None:
             try:
