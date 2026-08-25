@@ -445,7 +445,14 @@ PROFILES_SUBDIR = "profiles"
 
 
 def _profiles_root() -> Path:
-    return FLEET_HOME / PROFILES_SUBDIR
+    return Path(os.environ.get(
+        "FLEET_PROFILES_DIR", str(FLEET_HOME / PROFILES_SUBDIR)
+    )).expanduser()
+
+
+def _represented_profiles(graph: dict) -> set[str]:
+    """Canonical profile names already represented by graph nodes/aliases."""
+    return {resolve_profile(name) for name in graph}
 
 
 def discover_missing_profiles() -> list[dict]:
@@ -462,7 +469,7 @@ def discover_missing_profiles() -> list[dict]:
         graph = load_graph()
     except GraphError:
         graph = {}
-    known = set(graph)
+    known = _represented_profiles(graph)
 
     discovered = []
     for entry in sorted(root.iterdir(), key=lambda p: p.name):
@@ -538,18 +545,20 @@ def import_existing_profiles(
     imported: list[str] = []
     skipped: list[dict] = []
     unknown: list[str] = []
+    represented = _represented_profiles(graph)
 
     if supervisor and supervisor not in graph:
         raise GraphError(
             f"supervisor '{supervisor}' is not a known graph node")
 
     for name in dict.fromkeys(names):
-        if name in graph:
-            skipped.append({"name": name, "reason": "already in graph"})
+        if name in graph or name in represented:
+            skipped.append({"name": name, "reason": "already represented"})
         elif name not in on_disk:
             unknown.append(name)
         else:
             graph[name] = {"supervisor": supervisor or None, "subordinates": []}
+            represented.add(name)
             imported.append(name)
 
     if imported:

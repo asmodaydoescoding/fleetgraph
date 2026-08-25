@@ -21,6 +21,7 @@ try:
         discover_missing_profiles,
         import_existing_profiles,
         load_graph,
+        save_graph,
     )
 except ImportError as e:
     print(f"SKIP: {e}")
@@ -83,6 +84,19 @@ def main():
     # unknown name reported, nothing else disturbed
     res3 = import_existing_profiles(["does-not-exist"])
     check("unknown name reported", "does-not-exist" in res3["unknown"])
+
+    # alias collision: a canonical profile represented by a graph alias is
+    # already wired and must not be offered or imported a second time.
+    make_profile(home, "canonical-scout")
+    save_graph(
+        {"operator-scout": {"supervisor": None, "subordinates": []}},
+        extra_metadata={"profile_aliases": {"operator-scout": "canonical-scout"}},
+    )
+    alias_names = [d["name"] for d in discover_missing_profiles()]
+    check("canonical profile hidden behind graph alias", "canonical-scout" not in alias_names)
+    alias_res = import_existing_profiles(["canonical-scout"])
+    check("canonical alias collision skipped", alias_res["skipped"] and
+          alias_res["skipped"][0]["name"] == "canonical-scout")
 
     # reserved _meta: even a direct import call must not claim success
     (profiles_root / "_meta").mkdir(exist_ok=True)
