@@ -1,3 +1,4 @@
+release/allowlist.txt
 .gitignore
 LICENSE
 README.md
