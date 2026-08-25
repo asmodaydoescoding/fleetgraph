@@ -432,3 +432,126 @@ def describe(graph: dict, relations: dict | None = None) -> dict:
             entry["peers"] = relations.get(name, [])
         out[name] = entry
     return out
+
+
+# ── profile discovery + import (issue #4) ─────────────────────────────
+# Hermes keeps one directory per agent profile under FLEET_HOME/profiles/.
+# The graph YAML is the sole source of truth for topology; discovery only
+# REPORTS what exists on disk and import wires chosen profiles in through
+# the same normalize/save path as every other write. Explicit action, never
+# a startup auto-scan.
+
+PROFILES_SUBDIR = "profiles"
+
+
+def _profiles_root() -> Path:
+    return FLEET_HOME / PROFILES_SUBDIR
+
+
+def discover_missing_profiles() -> list[dict]:
+    """On-disk profile directories not yet represented as graph nodes.
+
+    Tolerant of odd directory shapes: non-directories are ignored, a
+    missing SOUL.md yields empty metadata instead of an error. Returns
+    [{name, title, description}] sorted by name.
+    """
+    root = _profiles_root()
+    if not root.is_dir():
+        return []
+    try:
+        graph = load_graph()
+    except GraphError:
+        graph = {}
+    known = set(graph)
+
+    discovered = []
+    for entry in sorted(root.iterdir(), key=lambda p: p.name):
+        if not entry.is_dir():
+            continue
+        name = entry.name
+        # '_meta' is reserved by the YAML document layout (normalize drops
+        # it silently), so offering it for import would report success
+        # while the node never appears. Exclude at discovery.
+        if name in known or name.startswith(".") or name == "_meta":
+            continue
+        title = ""
+        description = ""
+        soul_path = entry / "SOUL.md"
+        if soul_path.is_file():
+            try:
+                with open(soul_path, encoding="utf-8") as f:
+                    for line in f:
+                        s = line.strip()
+                        if not title and s.startswith("# "):
+                            title = s[2:].strip()
+                        low = s.lower()
+                        if not description and (
+                            low.startswith("you are")
+                            or low.startswith("**mission:**")
+                            or low.startswith("mission:")
+                        ):
+                            description = (
+                                s.split(". ")[0].rstrip(".")
+                                .replace("**", "").strip()
+                            )
+                        if title and description:
+                            break
+            except (OSError, UnicodeDecodeError):
+                pass  # unreadable persona: still importable, just unnamed
+        discovered.append({
+            "name": name,
+            "title": title,
+            "description": description,
+        })
+    return discovered
+
+
+def import_existing_profiles(
+    names: list[str], supervisor: str | None = None,
+) -> dict:
+    """Wire existing on-disk profiles into the graph.
+
+    Collision policy: a requested name already in the graph is skipped
+    (reported, never overwritten). Names that do not exist on disk are
+    reported as unknown. Returns
+    {imported: [names], skipped: [{name, reason}], unknown: [names]}.
+    """
+    root = _profiles_root()
+    on_disk: set[str] = set()
+    if root.is_dir():
+        for entry in root.iterdir():
+            # '_meta' excluded for the same reason as in discovery: the
+            # reserved name would vanish at normalize() after a claimed
+            # success. Defense in depth if import is called directly.
+            if (
+                entry.is_dir()
+                and not entry.name.startswith(".")
+                and entry.name != "_meta"
+            ):
+                on_disk.add(entry.name)
+
+    try:
+        graph = load_graph()
+    except GraphError as e:
+        raise GraphError(f"fleet graph unusable: {e}") from e
+
+    imported: list[str] = []
+    skipped: list[dict] = []
+    unknown: list[str] = []
+
+    if supervisor and supervisor not in graph:
+        raise GraphError(
+            f"supervisor '{supervisor}' is not a known graph node")
+
+    for name in dict.fromkeys(names):
+        if name in graph:
+            skipped.append({"name": name, "reason": "already in graph"})
+        elif name not in on_disk:
+            unknown.append(name)
+        else:
+            graph[name] = {"supervisor": supervisor or None, "subordinates": []}
+            imported.append(name)
+
+    if imported:
+        save_graph(graph)
+    return {"imported": imported, "skipped": skipped, "unknown": unknown}
