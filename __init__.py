@@ -26,6 +26,7 @@ from fleet_graph_core import (  # noqa: E402
 )
 
 _HEADING = "## Fleet chain of command"
+_MAX_SECTION_CHARS = 3900
 
 
 def _profile_name() -> str:
@@ -148,7 +149,23 @@ def _section(session_info) -> str:
         "the frame: talk -> peers; delegate -> your reports + supervisor `done`; supervisor -> "
         "your supervisor.",
     ]
-    return "\n".join(lines)
+    rendered = "\n".join(lines)
+    if len(rendered) <= _MAX_SECTION_CHARS:
+        return rendered
+
+    # The roster is useful context but can grow with the fleet. Drop only its
+    # optional detail first so the routing contract below is never truncated.
+    try:
+        roster_start = rendered.index("FLEET ROSTER")
+        instructions_start = rendered.index("WHEN TO INITIATE", roster_start)
+        rendered = (
+            rendered[:roster_start]
+            + "FLEET ROSTER — detail omitted because the fleet is large.\n\n"
+            + rendered[instructions_start:]
+        )
+    except ValueError:
+        pass
+    return rendered[:_MAX_SECTION_CHARS]
 
 
 def register(ctx) -> None:
