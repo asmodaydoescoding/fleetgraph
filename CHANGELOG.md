@@ -19,6 +19,9 @@
 - **Fleet Hierarchy Builder skill.** Added an on-demand draft-and-diff workflow
   for existing Hermes profiles. It validates cycles, unknown supervisors, and
   duplicates before an explicit topology-only apply.
+- **Profile import.** Added an explicit discovery/import flow for Hermes profiles
+  already present on disk, with metadata seeding, collision-safe canonical alias
+  handling, configurable profile-root support, and isolated regression coverage.
 - **Live dashboard route remount.** Hermes now exposes confirmed
   `plugins.manage` → `reload_dashboard_routes`; Fleetgraph uses it to recover
   from the enabled-but-unmounted 404 state without restarting the backend.
