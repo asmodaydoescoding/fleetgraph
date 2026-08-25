@@ -1002,10 +1002,13 @@ function MessageComposer({ name, node, relations }) {
   const effectiveTarget = targets.length === 1 ? targets[0]
     : (targets.includes(target) ? target : '')
   const canSend = text.trim().length > 0 && (targets.length === 0 ? false : !!effectiveTarget) && !send.isPending
+  const deliveryLabel = result?.delivery?.state === 'queued' ? 'queued'
+    : result?.delivery?.state === 'failed' ? 'inbox recorded; live start failed'
+    : 'recorded'
 
   return jsxs('div', { className: 'flex flex-col gap-2.5', children: [
     jsx('div', { className: 'text-[0.6875rem] leading-4 text-(--ui-text-secondary)', children:
-      `Open a conversation with ${node?.title || name}. The message lands in the chosen bot's inbox, framed so it knows whether to answer coworkers, invoke its supervisor, or delegate downward.` }),
+      `Start a framed conversation with ${node?.title || name}. The recipient's Bot Chat turn is queued now, and the inbox keeps a durable copy.` }),
     // frame picker
     jsxs('div', { className: 'flex flex-col gap-1', children: [
       jsx('div', { className: 'text-[0.625rem] font-medium uppercase tracking-wide text-(--ui-text-secondary)', children: 'frame' }),
@@ -1036,21 +1039,21 @@ function MessageComposer({ name, node, relations }) {
     // text
     jsx(Textarea, {
       className: 'h-24 resize-none text-xs font-mono',
-      placeholder: 'message — be specific; this is delivered as-is into their inbox',
+      placeholder: 'message — specific instructions are queued into Bot Chat; inbox copy retained',
       value: text, onChange: e => setText(e.target.value),
     }),
     jsx(Button, {
       disabled: !canSend,
       // recipient rides along for the talk frame only (validated server-side
       // against the peer list); delegate/supervisor resolve it from the graph.
-      onClick: () => send.mutate({ to: name, kind, text: text.trim(), ...(kind === 'talk' && effectiveTarget ? { recipient: effectiveTarget } : {}) }),
-      children: send.isPending ? 'sending…' : 'Send to inbox'
+      onClick: () => send.mutate({ to: name, kind, live: true, text: text.trim(), ...(kind === 'talk' && effectiveTarget ? { recipient: effectiveTarget } : {}) }),
+      children: send.isPending ? 'starting…' : 'Start conversation'
     }),
     result && jsx('div', {
       className: cn('rounded-md border p-2 text-[0.6875rem] leading-4',
-        result.ok ? 'border-(--fg-success)/40 text-(--ui-text-secondary)' : 'border-(--fg-danger)/50 text-(--fg-danger)'),
+        result.ok && result.delivery?.state !== 'failed' ? 'border-(--fg-success)/40 text-(--ui-text-secondary)' : 'border-(--fg-danger)/50 text-(--fg-danger)'),
       children: result.ok
-        ? `delivered → ${result.recipient} (frame: ${result.frame}, edge: ${result.edge})`
+        ? `${deliveryLabel} → ${result.recipient} (frame: ${result.frame}, edge: ${result.edge})`
         : result.error,
     }),
   ] })

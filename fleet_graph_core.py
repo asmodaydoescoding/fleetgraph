@@ -145,8 +145,13 @@ def load_profile_aliases() -> dict[str, str]:
     aliases: dict[str, str] = {}
     for alias, profile in raw.items():
         alias, profile = str(alias).strip(), str(profile).strip()
-        if not alias or not profile or alias == "_meta":
-            raise GraphError("profile aliases require non-empty profile names")
+        if (not alias or not profile or alias == "_meta" or
+                alias != os.path.basename(alias) or
+                profile != os.path.basename(profile) or
+                alias in (".", "..") or profile in (".", "..") or
+                len(alias.encode("utf-8", "surrogatepass")) > 255 or
+                len(profile.encode("utf-8", "surrogatepass")) > 255):
+            raise GraphError("profile aliases require plain, bounded profile names")
         aliases[alias] = profile
     return aliases
 

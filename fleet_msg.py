@@ -14,9 +14,10 @@ from __future__ import annotations
 import argparse, json, os, shutil, subprocess, sys, tempfile, datetime, pathlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fleet_graph_core import (DEFAULT_PROFILE, FLEET_HOME, load_graph,
-                              load_relations, can_communicate, chain,
-                              describe, GraphError)  # noqa: E402
+from fleet_graph_core import (DEFAULT_PROFILE, FLEET_HOME, GraphError,
+                              can_communicate, chain, describe,
+                              graph_node_for_profile, load_graph,
+                              load_relations, resolve_profile)  # noqa: E402
 
 HERMES = FLEET_HOME
 INBOX_DIR = pathlib.Path(os.environ.get(
@@ -56,12 +57,15 @@ def cmd_send(args):
         # parse — never a raw traceback on stderr.
         print(json.dumps({"ok": False, "error": f"fleet graph unusable: {e}"}))
         sys.exit(2)
-    sender = _sender(args)
-    ok, why = can_communicate(graph, sender, args.to, relations)
+    sender_raw = _sender(args)
+    sender = graph_node_for_profile(sender_raw, graph) or sender_raw
+    target_node = graph_node_for_profile(args.to, graph) or args.to
+    ok, why = can_communicate(graph, sender, target_node, relations)
     if not ok:
         print(json.dumps({"ok": False, "error": why}))
         sys.exit(2)
 
+    target_profile = resolve_profile(target_node)
     body = args.summary or ""
     if args.file:
         body += "\n\n" + pathlib.Path(args.file).read_text()
@@ -76,9 +80,10 @@ def cmd_send(args):
 
     # 1. inbox file (durable, drainable) — always the primary transport.
     INBOX_DIR.mkdir(parents=True, exist_ok=True)
-    inbox = INBOX_DIR / f"{args.to}.jsonl"
+    inbox = INBOX_DIR / f"{target_profile}.jsonl"
     rec = {"ts": datetime.datetime.utcnow().isoformat() + "Z", "from": sender,
-           "type": args.type, "task": args.task, "summary": (args.summary or "")[:500]}
+           "to": target_node, "type": args.type, "task": args.task,
+           "summary": (args.summary or "")[:500]}
     with open(inbox, "a") as f:
         f.write(json.dumps(rec) + "\n")
 
@@ -87,19 +92,24 @@ def cmd_send(args):
     #    normal flow is inbox-only; supervisors drain on their routine.
     delivered = None
     if args.deliver:
-        delivered = _deliver_dm(args.to, full)
+        delivered = _deliver_dm(target_profile, full)
 
-    out = {"ok": True, "edge": why, "to": args.to, "inbox": str(inbox)}
+    out = {"ok": True, "edge": why, "to": target_node,
+           "profile": target_profile, "inbox": str(inbox)}
     if delivered is not None:
         out["delivered"] = delivered
     print(json.dumps(out))
 
 
 def cmd_inbox(args):
-    profile = args.profile or _sender(args)
+    requested = args.profile or _sender(args)
+    try:
+        profile = resolve_profile(requested)
+    except GraphError:
+        profile = requested
     inbox = INBOX_DIR / f"{profile}.jsonl"
     if not inbox.exists():
-        print(json.dumps({"profile": profile, "messages": []}))
+        print(json.dumps({"profile": requested, "messages": []}))
         return
     # skip malformed lines (partial writes, corruption) — never crash on them
     lines = []
@@ -111,7 +121,7 @@ def cmd_inbox(args):
             lines.append(json.loads(l))
         except Exception:
             continue
-    print(json.dumps({"profile": profile, "messages": lines}))
+    print(json.dumps({"profile": requested, "messages": lines}))
     if args.drain:
         inbox.unlink()
 
