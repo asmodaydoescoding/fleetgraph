@@ -185,7 +185,7 @@ scan, records the source/revision, and enables the backend explicitly.
 
 ```bash
 # Pin the verified Fleetgraph v0.8.0 tree for reproducible installation.
-FLEET_GRAPH_REF="f4c8e9cf4212316dfec3daf654915411c7a84576"
+FLEET_GRAPH_REF="52a288a"
 hermes plugins install asmodaydoescoding/fleetgraph \\
   --ref "$FLEET_GRAPH_REF" \\
   --enable
