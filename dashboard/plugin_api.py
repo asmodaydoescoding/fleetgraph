@@ -37,8 +37,9 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))
 from fleet_graph_core import (  # noqa: E402
     DEFAULT_PROFILE, FLEET_HOME, GraphError, can_communicate, chain, describe,
-    graph_node_for_profile, load_graph, load_metadata, load_relations,
-    normalize, normalize_relations, resolve_profile, save_graph, write_lock,
+    discover_missing_profiles, graph_node_for_profile, import_existing_profiles,
+    load_graph, load_metadata, load_relations, normalize, normalize_relations,
+    resolve_profile, save_graph, write_lock,
 )
 from starter_pack import PackValidationError, load_pack, selected_actions  # noqa: E402
 
@@ -1291,6 +1292,59 @@ def _explain_graph_error(exc: GraphError) -> str:
             "Bots/Profiles page first, or remove the reference from this edit."
         )
     return detail
+
+
+class ImportProfiles(BaseModel):
+    profiles: list[str]
+    supervisor: str | None = None
+
+
+@router.get("/profiles/discover")
+def discover_profiles():
+    """On-disk Hermes profile directories not yet wired into the graph.
+
+    Delegates to the SSOT core so the CLI and dashboard can never drift.
+    Explicit-import only (no startup auto-scan), so fleet_graph.yaml stays
+    the sole source of truth for graph structure. Display metadata comes
+    from each profile's own files (profile.yaml / SOUL.md / config.yaml).
+    """
+    try:
+        graph = describe(load_graph())
+    except GraphError as e:
+        raise HTTPException(500, str(e))
+    represented = {resolve_profile(name) for name in graph}
+    discovered = []
+    for entry in discover_missing_profiles():
+        name = entry["name"]
+        if name in represented or name == DEFAULT_PROFILE:
+            continue
+        meta = _profile_meta(name)
+        cap = _capability_summary(name)
+        discovered.append({
+            "name": name,
+            "title": meta.get("title") or cap.get("headline") or entry.get("title") or name,
+            "description": cap.get("summary") or meta.get("description") or entry.get("description") or "",
+            "model": meta.get("model") or "",
+            "provider": meta.get("provider") or "",
+            "toolsets": meta.get("toolsets") or [],
+        })
+    return {"discovered": discovered}
+
+
+@router.post("/profiles/import")
+def import_profiles(batch: ImportProfiles):
+    """Wire existing on-disk profiles into the graph.
+
+    Collision policy (ruled): a requested profile that is already a graph
+    node is skipped with a warning rather than overwritten. Each imported
+    node starts unassigned unless a supervisor is supplied; the operator
+    can re-wire in the editor afterwards.
+    """
+    try:
+        result = import_existing_profiles(batch.profiles, batch.supervisor)
+    except GraphError as e:
+        raise HTTPException(422, str(e))
+    return {"ok": True, **result}
 
 
 @router.get("/relations")

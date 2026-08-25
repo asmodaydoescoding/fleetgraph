@@ -118,6 +118,10 @@ and an operator-facing place to build and run the whole system.
   skills, and persona are copied by Hermes itself. If a profile already exists
   but is not wired into Fleetgraph, **Adopt & wire in** attaches it without
   recreating it and applies only the explicit edits made in the dialog.
+- **Import existing profiles** — the create dialog can explicitly scan the configured
+  Hermes profiles directory, seed lightweight metadata from each SOUL.md, and wire
+  selected unregistered profiles into the graph. Aliases, collisions, reserved
+  directories, and unknown names are handled without overwriting existing nodes.
 - **SOUL editing** — per-bot SOUL.md editor (default profile protected).
 - **Semantic routing** — `GET /api/plugins/fleet-graph/match?q=<task>&top=N`
   ranks the fleet by capability similarity (local fastembed embeddings,
@@ -339,6 +343,8 @@ No credentials are read, no network calls leave the machine.
 | `POST /hierarchy/preview` | Validate a staged hierarchy and return a read-only diff |
 | `PUT /hierarchy/apply` | Apply a hierarchy only with explicit `confirm: true` |
 | `POST /send` | Validated `talk` / `delegate` / `supervisor` delivery; `live: true` queues recipient Bot Chat while preserving the inbox copy |
+| `GET /profiles/discover` | List unregistered on-disk Hermes profiles with seeded metadata |
+| `POST /profiles/import` | Explicitly wire selected existing profiles into the graph |
 
 ## Development
 

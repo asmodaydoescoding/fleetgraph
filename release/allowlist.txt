@@ -26,6 +26,7 @@ tests/a1_audit.py
 tests/backend_loop8_test.py
 tests/boundary-harness.mjs
 tests/c4-create-probe.mjs
+tests/communication_live_test.py
 tests/configurability_test.py
 tests/drive-harness.mjs
 tests/helpers/generic-fleet.mjs
@@ -44,5 +45,6 @@ tests/public_integration_test.py
 tests/public_release_test.py
 tests/starter_pack_test.py
 tests/starter_pack_install_contract_test.py
+tests/profile_import_test.py
 tests/workflow_contract_test.py
 tests/render-harness.mjs
