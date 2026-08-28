@@ -1,4 +1,4 @@
-"""Fleet Graph plugin — dashboard backend API.
+"""Fleetgraph plugin — dashboard backend API.
 
 Mounted at /api/plugins/fleet-graph/ by the dashboard plugin system.
 Thin FastAPI wrapper around fleet_graph_core (the SSOT module shared with
@@ -16,9 +16,15 @@ Extensions over the original surface:
 from __future__ import annotations
 
 import base64
+import datetime
 import json
 import os
+import re
+import shutil
+import subprocess
 import sys
+import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -31,15 +37,20 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))
 from fleet_graph_core import (  # noqa: E402
     DEFAULT_PROFILE, FLEET_HOME, GraphError, can_communicate, can_delegate_to,
-    chain, describe, graph_node_for_profile, load_graph, load_metadata,
-    load_relations, normalize_relations, resolve_profile, save_graph,
-    subtree_depth, subtree_nodes,
+    chain, describe, discover_missing_profiles, graph_node_for_profile,
+    import_existing_profiles, load_graph, load_metadata, load_relations,
+    normalize, normalize_relations, resolve_profile, save_graph, subtree_depth,
+    subtree_nodes, write_lock,
 )
+from starter_pack import PackValidationError, load_pack, selected_actions  # noqa: E402
 
 HERMES = FLEET_HOME
 INBOX_DIR = Path(os.environ.get("FLEET_INBOX_DIR", str(HERMES / "fleet-inbox"))).expanduser()
 PROFILES_DIR = Path(os.environ.get("FLEET_PROFILES_DIR", str(HERMES / "profiles"))).expanduser()
 WATERMARK_DIR = INBOX_DIR / ".read"
+STARTER_PACKS_DIR = _HERE.parent / "starter-packs"
+HERMES_BIN = os.environ.get("FLEET_HERMES_BIN") or shutil.which("hermes") or "hermes"
+_LIVE_TURN_TIMEOUT_S = 600
 
 router = APIRouter()
 
@@ -53,10 +64,23 @@ class NodeUpdate(BaseModel):
 class GraphUpdate(BaseModel):
     nodes: dict[str, NodeUpdate]
     relations: dict[str, list[str]] | None = None
+    # Explicit node removals. Absent -> nothing is removed: the save MERGES
+    # payload nodes over the on-disk graph, so a stale/half-loaded client can
+    # never silently drop topology it did not include (the "new agent vanished"
+    # / "X is not a known profile" bug class). Deletion is opt-in only.
+    remove: list[str] = []
 
 
 class RelationsUpdate(BaseModel):
     relations: dict[str, list[str]]
+
+
+class StarterPackSelection(BaseModel):
+    profiles: list[str]
+
+
+class HierarchyApply(GraphUpdate):
+    confirm: bool = False
 
 
 class SimulateSend(BaseModel):
@@ -94,6 +118,92 @@ def _profile_dir(name: str) -> Path | None:
         return None
     except OSError:
         return None  # ENAMETOOLONG / permission / etc. — treat as not found
+
+
+def _reconcile_deleted_graph_profiles(graph: dict | None = None,
+                                      relations: dict | None = None) -> tuple[dict, dict]:
+    """Prune graph nodes whose Hermes profile was deleted elsewhere.
+
+    The built-in Profiles/Bots page owns profile-directory deletion while this
+    plugin owns the separate fleet topology file. Reconcile at every read
+    boundary so a deleted profile disappears from Deck/Graph/options promptly,
+    and so a later stale client save cannot resurrect it. Existing children of
+    a deleted supervisor become roots; peer links to deleted nodes disappear.
+    Graph-only nodes remain valid: only names previously observed as real
+    Hermes profiles are eligible for deletion reconciliation.
+    """
+    if graph is None:
+        graph = load_graph()
+    if relations is None:
+        relations = load_relations()
+
+    metadata = load_metadata()
+    deleted_profiles = set(metadata.get("deleted_profiles") or [])
+    profile_snapshot = set(metadata.get("profile_snapshot") or [])
+    current_profiles = {name for name in graph if _profile_dir(name) is not None}
+    stale = [
+        name for name in graph
+        if name in deleted_profiles or
+        (name in profile_snapshot and name not in current_profiles)
+    ]
+    next_snapshot = profile_snapshot | current_profiles
+    if not stale and next_snapshot == profile_snapshot:
+        return graph, relations
+
+    with write_lock():
+        disk = load_graph()
+        disk_relations = load_relations()
+        metadata = load_metadata()
+        deleted_profiles = set(metadata.get("deleted_profiles") or [])
+        profile_snapshot = set(metadata.get("profile_snapshot") or [])
+        current_profiles = {name for name in disk if _profile_dir(name) is not None}
+        stale = [
+            name for name in disk
+            if name in deleted_profiles or
+            (name in profile_snapshot and name not in current_profiles)
+        ]
+        next_snapshot = profile_snapshot | current_profiles
+        if not stale:
+            if next_snapshot != profile_snapshot:
+                saved = save_graph(
+                    disk,
+                    relations=disk_relations,
+                    extra_metadata={"profile_snapshot": sorted(next_snapshot)},
+                )
+                return saved, load_relations()
+            return disk, disk_relations
+
+        stale_set = set(stale)
+        cleaned = {}
+        for name, node in disk.items():
+            if name in stale_set:
+                continue
+            entry = dict(node or {})
+            if entry.get("supervisor") in stale_set:
+                entry["supervisor"] = None
+            entry["subordinates"] = [
+                child for child in (entry.get("subordinates") or [])
+                if child not in stale_set
+            ]
+            cleaned[name] = entry
+
+        cleaned_relations = {}
+        for name, peers in disk_relations.items():
+            if name in stale_set:
+                continue
+            kept = [peer for peer in (peers or []) if peer not in stale_set]
+            if kept:
+                cleaned_relations[name] = kept
+        deleted_profiles.update(stale)
+        saved = save_graph(
+            cleaned,
+            relations=cleaned_relations,
+            extra_metadata={
+                "deleted_profiles": sorted(deleted_profiles),
+                "profile_snapshot": sorted(next_snapshot),
+            },
+        )
+        return saved, load_relations()
 
 
 def _read_yaml(path: Path) -> dict:
@@ -231,6 +341,232 @@ def roster():
     return {"roster": out}
 
 
+@router.get("/workflows")
+def workflows():
+    """Expose the two shipped Fleetgraph workflows as explicit operator actions."""
+    return {
+        "workflows": [
+            {
+                "id": "fleet-bot-advisor",
+                "kind": "advisor",
+                "skill": "skills/fleet-bot-advisor/SKILL.md",
+                "version": "0.1.0",
+                "mode": "observe_summarize_recommend_ask_create",
+                "approval_required": True,
+                "raw_transcripts": False,
+                "mutates": False,
+            },
+            {
+                "id": "fleet-hierarchy-builder",
+                "kind": "hierarchy",
+                "skill": "skills/fleet-hierarchy-builder/SKILL.md",
+                "version": "0.1.0",
+                "mode": "preview_diff_validate_ask_apply",
+                "approval_required": True,
+                "raw_transcripts": False,
+                "mutates": False,
+            },
+        ],
+    }
+
+
+@router.get("/advisor/preview")
+def advisor_preview(days: int = Query(default=30, ge=1, le=90)):
+    """Return coarse local signals and review-only recommendations.
+
+    This endpoint never reads session text, credentials, tool payloads, or
+    transcript bodies. Profile creation remains a separate approved action.
+    """
+    graph = load_graph()
+    known = set(_known_profiles())
+    members = set(graph)
+    unassigned = sorted(name for name in known if name not in members)
+    recommendations = []
+    if len(known) <= 1:
+        recommendations.append({
+            "id": "review-starter-pack",
+            "reason": "Only the default profile is present; an optional starter pack may reduce setup friction.",
+            "source": "starter-packs/starfleet-complement/pack.yaml",
+            "changes_existing_profiles": False,
+            "next_step": "Preview the pack, select profiles, and approve creation individually.",
+        })
+    if unassigned:
+        recommendations.append({
+            "id": "review-existing-profiles",
+            "reason": f"{len(unassigned)} existing profile(s) are not in the fleet graph.",
+            "source": "profiles.list metadata",
+            "profiles": unassigned,
+            "changes_existing_profiles": False,
+            "next_step": "Open the hierarchy preview and approve topology-only adoption.",
+        })
+    return {
+        "days": days,
+        "signals": {
+            "profile_count": len(known),
+            "graph_member_count": len(members),
+            "unassigned_profile_count": len(unassigned),
+        },
+        "recommendations": recommendations,
+        "privacy": {
+            "local_only": True,
+            "coarse_signals": True,
+            "raw_transcripts": False,
+            "credential_capture": False,
+            "automatic_creation": False,
+        },
+        "mutates": False,
+        "approval_required": True,
+    }
+
+
+def _hierarchy_preview(update: GraphUpdate) -> dict:
+    """Validate a hierarchy draft without writing the graph."""
+    disk = load_graph()
+    merged = {name: dict(node or {}) for name, node in disk.items()}
+    for name, node in update.nodes.items():
+        entry = dict(merged.get(name, {}))
+        if "supervisor" in node.model_fields_set:
+            entry["supervisor"] = node.supervisor
+        if node.subordinates is not None:
+            entry["subordinates"] = node.subordinates
+        merged[name] = entry
+    for name in update.remove:
+        merged.pop(name, None)
+    relations = load_relations() if update.relations is None else update.relations
+    normalized = normalize(merged)
+    normalized_relations = normalize_relations(relations, normalized)
+    before = describe(disk, load_relations())
+    after = describe(normalized, normalized_relations)
+    changed = sorted(
+        name for name in set(before) | set(after)
+        if before.get(name) != after.get(name)
+    )
+    return {
+        "valid": True,
+        "mutates": False,
+        "approval_required": True,
+        "changed_profiles": changed,
+        "before": before,
+        "after": after,
+        "validation": {
+            "cycles": False,
+            "unknown_profiles": False,
+            "duplicates": False,
+        },
+    }
+
+
+@router.post("/hierarchy/preview")
+def hierarchy_preview(update: GraphUpdate):
+    """Validate and return a graph diff without mutating topology."""
+    try:
+        return _hierarchy_preview(update)
+    except GraphError as exc:
+        raise HTTPException(422, _explain_graph_error(exc)) from exc
+
+
+@router.put("/hierarchy/apply")
+def hierarchy_apply(update: HierarchyApply):
+    """Apply one reviewed hierarchy draft after explicit confirmation."""
+    if update.confirm is not True:
+        raise HTTPException(409, "hierarchy apply requires confirm=true")
+    result = put_graph(GraphUpdate(
+        nodes=update.nodes,
+        relations=update.relations,
+        remove=update.remove,
+    ))
+    return {
+        **result,
+        "workflow": "fleet-hierarchy-builder",
+        "approval": "explicit",
+        "mutates": True,
+    }
+
+
+def _starter_pack_dir(pack_id: str) -> Path:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", pack_id or ""):
+        raise HTTPException(status_code=404, detail="Starter pack not found.")
+    root = (STARTER_PACKS_DIR / pack_id).resolve()
+    try:
+        root.relative_to(STARTER_PACKS_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Starter pack not found.") from None
+    if not root.is_dir():
+        raise HTTPException(status_code=404, detail="Starter pack not found.")
+    return root
+
+
+def _public_starter_pack(pack: dict) -> dict:
+    available = set(_known_profiles())
+    public = {key: value for key, value in pack.items() if key != "root"}
+    public["profiles"] = [
+        {
+            **row,
+            "installed": row["name"] in available,
+            "action": "adopt" if row["name"] in available else "create",
+        }
+        for row in pack["profiles"]
+    ]
+    public["available_clone_sources"] = sorted(available)
+    return public
+
+
+@router.get("/starter-packs")
+def starter_packs():
+    """List optional, inert starter packs without executing pack content."""
+    rows = []
+    if STARTER_PACKS_DIR.is_dir():
+        for child in sorted(STARTER_PACKS_DIR.iterdir(), key=lambda item: item.name):
+            if not child.is_dir() or not (child / "pack.yaml").is_file():
+                continue
+            try:
+                pack = load_pack(child, available_profiles=_known_profiles())
+                rows.append({
+                    "id": pack["id"],
+                    "version": pack["version"],
+                    "title": pack["title"],
+                    "description": pack["description"],
+                    "license": pack["license"],
+                    "profile_count": len(pack["profiles"]),
+                    "checksum": pack["checksum"],
+                    "valid": True,
+                })
+            except PackValidationError as exc:
+                rows.append({"id": child.name, "valid": False, "error": str(exc)})
+    return {"packs": rows}
+
+
+@router.get("/starter-packs/{pack_id}")
+def starter_pack_preview(pack_id: str):
+    """Return a validated, read-only starter-pack preview."""
+    root = _starter_pack_dir(pack_id)
+    try:
+        return _public_starter_pack(load_pack(root, available_profiles=_known_profiles()))
+    except PackValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/starter-packs/{pack_id}/selection")
+def starter_pack_selection(pack_id: str, selection: StarterPackSelection):
+    """Validate an explicit profile selection without mutating Hermes."""
+    root = _starter_pack_dir(pack_id)
+    try:
+        pack = load_pack(root, available_profiles=_known_profiles())
+        actions = selected_actions(
+            pack,
+            selection.profiles,
+            available_profiles=_known_profiles(),
+        )
+    except PackValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "pack_id": pack["id"],
+        "profiles": actions,
+        "mutates": False,
+        "next_step": "Use profiles.create for create actions, adopt existing profiles, then apply the reviewed graph diff.",
+    }
+
+
 # ── semantic matching over the roster ──────────────────────────────
 # Local onnx embeddings via fastembed (already in the agent venv) — no API
 # calls, no cost. The model downloads once (~0.6 GB) on first use, then the
@@ -334,8 +670,21 @@ def match(q: str, top: int = 3):
     }
 
 
+def _storage_profile(name: str) -> str:
+    """Return the canonical on-disk profile name for a graph-facing name."""
+    try:
+        canonical = resolve_profile(str(name).strip())
+    except Exception:
+        canonical = str(name).strip()
+    if (not canonical or canonical != os.path.basename(canonical) or
+            canonical in (".", "..") or
+            len(canonical.encode("utf-8", "surrogatepass")) > 255):
+        return "__invalid_profile__"
+    return canonical
+
+
 def _inbox_file(name: str) -> Path:
-    return INBOX_DIR / f"{name}.jsonl"
+    return INBOX_DIR / f"{_storage_profile(name)}.jsonl"
 
 
 def _recent_traffic(window_s: int = 300) -> list[dict]:
@@ -360,6 +709,7 @@ def _recent_traffic(window_s: int = 300) -> list[dict]:
                     rec = json.loads(line)
                 except Exception:
                     continue
+                to_name = rec.get("to") or f.stem
                 ts = _parse_ts(rec.get("ts") or "")
                 if ts and ts >= cutoff:
                     out.append({
@@ -390,6 +740,10 @@ class FleetSend(BaseModel):
     # supervisor (those directions are resolved from the graph). Validated
     # against the target's peer list so it can't spoof an edge.
     recipient: str | None = None
+    # The UI can explicitly boot the receiving Bot Chat turn. The inbox write
+    # remains unconditional, so a queued/failed live turn never loses the
+    # durable message. CLI fleet-msg stays inbox-first unless --deliver is used.
+    live: bool = False
     # Optional delegate contract — when kind=delegate, verifies the target's
     # subtree can absorb the work before routing. Ignored for other frames.
     # Additive: old clients omit this field, behavior unchanged.
@@ -401,6 +755,53 @@ class DelegateCheck(BaseModel):
     recipient: str
     contract: dict | None = None
 
+
+def _queue_live_turn(target: str, body: str) -> dict:
+    """Start a non-blocking Bot Chat turn for a graph-initiated message.
+
+    The inbox is the durable transport; this is the activation layer that was
+    missing from the graph composer. The query file survives until the child
+    exits, and a daemon reaper prevents temp-file leaks after normal completion
+    or a timeout. Return a state contract rather than claiming completion.
+    """
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+        f.write(body)
+        query_path = f.name
+    try:
+        proc = subprocess.Popen(
+            [HERMES_BIN, "-p", target, "chat", "--in", "~", "-c", "Bot Chat",
+             "--create-if-missing", "-Q", "--query-file", query_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        try:
+            Path(query_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+        return {"state": "failed", "reason": "Bot Chat process could not be started"}
+
+    def reap() -> None:
+        try:
+            proc.wait(timeout=_LIVE_TURN_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        finally:
+            try:
+                Path(query_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    threading.Thread(target=reap, name=f"fleet-live-{target}", daemon=True).start()
+    return {"state": "queued", "pid": proc.pid}
 
 # The only frames the FLEET-TALK prompt section knows how to resolve. Anything
 # else would land in an inbox as a frame no bot can interpret — reject early.
@@ -436,7 +837,8 @@ def fleet_send(msg: FleetSend):
     except GraphError as e:
         raise HTTPException(500, f"fleet graph unusable: {e}")
 
-    recipient, text = DEFAULT_PROFILE, msg.text.strip()
+    recipient = DEFAULT_PROFILE
+    recipient_node = ""
     # 'to' names the TARGET bot; sender is resolved from the relationship:
     # delegate/supervisor imply direction, so we compute who talks to whom
     # from the graph rather than trusting the client.
@@ -454,7 +856,8 @@ def fleet_send(msg: FleetSend):
                 "the default profile is not represented in the graph — "
                 "add it directly or configure _meta.profile_aliases",
             )
-        recipient = target
+        recipient_node = target
+        recipient = resolve_profile(recipient_node)
         ok, why = can_communicate(graph, sender_name, target, relations)
         if ok and msg.delegate_contract:
             # Additive: optional contract check — verifies subtree can absorb
@@ -467,8 +870,10 @@ def fleet_send(msg: FleetSend):
         sup = graph.get(target, {}).get("supervisor")
         if not sup:
             raise HTTPException(422, f"'{target}' has no supervisor to escalate to")
-        sender_name, recipient = target, sup
-        ok, why = can_communicate(graph, sender_name, recipient, relations)
+        sender_name = target
+        recipient_node = sup
+        recipient = resolve_profile(recipient_node)
+        ok, why = can_communicate(graph, sender_name, sup, relations)
     else:  # talk — operator relays a peer conversation opener from this bot
         peers = [p for p in relations.get(target, [])]
         if not peers:
@@ -479,31 +884,43 @@ def fleet_send(msg: FleetSend):
         wanted = (msg.recipient or "").strip()
         if wanted and wanted not in peers:
             raise HTTPException(422, f"'{wanted}' is not a peer of '{target}'")
-        sender_name, recipient = target, (wanted or peers[0])
-        ok, why = can_communicate(graph, sender_name, recipient, relations)
+        recipient_node = wanted or peers[0]
+        sender_name, recipient = target, resolve_profile(recipient_node)
+        ok, why = can_communicate(graph, sender_name, recipient_node, relations)
 
     if not ok:
         raise HTTPException(422, f"edge refused: {why}")
 
     INBOX_DIR.mkdir(parents=True, exist_ok=True)
-    inbox = INBOX_DIR / f"{recipient}.jsonl"
+    inbox = _inbox_file(recipient)
     rec = {
         "ts": _now_iso(),
         "from": sender_name,
+        "to": recipient_node,
         "type": msg.kind,
         "frame": msg.kind,
+        "live_requested": msg.live,
         "summary": msg.text[:500],
     }
     with open(inbox, "a") as f:
         f.write(json.dumps(rec) + "\n")
 
+    delivery = {"mode": "inbox", "state": "recorded"}
+    if msg.live:
+        live_body = (
+            "FLEET MESSAGE — resolve this through the Fleet chain of command.\n"
+            f"sender: {sender_name}\nrecipient: {recipient_node}\nframe: {msg.kind}\n\n"
+            f"{msg.text.strip()}\n\nEND FLEET MESSAGE"
+        )
+        delivery = {"mode": "live", **_queue_live_turn(_storage_profile(recipient), live_body)}
+
     return {
         "ok": True, "edge": why,
         "sender": sender_name, "recipient": recipient,
-        "frame": msg.kind, "hint": (
-            f"{recipient} will see this framed as {msg.kind} from {sender_name}. "
-            f"It decides to answer coworkers, invoke its supervisor, or delegate "
-            f"based on the initiative ladder in its next session."
+        "frame": msg.kind, "delivery": delivery, "hint": (
+            f"{recipient_node} received a framed {msg.kind} message from {sender_name}. "
+            + ("Its Bot Chat turn is queued now." if msg.live else
+               "It will be handled on its next session.")
         ),
     }
 
@@ -526,6 +943,10 @@ def _read_inbox(name: str) -> list[dict]:
 
 
 def _watermark_file(name: str) -> Path:
+    try:
+        name = _storage_profile(name)
+    except (GraphError, OSError):
+        pass
     try:
         WATERMARK_DIR.mkdir(parents=True, exist_ok=True)
     except (OSError, FileExistsError):
@@ -565,6 +986,14 @@ def _inbox_counts() -> dict[str, int]:
                 counts[f.stem] = sum(1 for line in f.read_text().splitlines() if line.strip())
             except Exception:
                 counts[f.stem] = 0
+    # The UI addresses graph nodes; storage uses canonical profile names.
+    # Mirror canonical counts onto aliases without creating duplicate files.
+    try:
+        for graph_name in load_graph():
+            canonical = _storage_profile(graph_name)
+            counts[graph_name] = counts.get(canonical, counts.get(graph_name, 0))
+    except GraphError:
+        pass
     return counts
 
 
@@ -663,7 +1092,8 @@ def _latest_session(name: str) -> dict | None:
 @router.get("/graph")
 def get_graph():
     try:
-        return {"graph": describe(load_graph()), "profiles": _known_profiles()}
+        graph, relations = _reconcile_deleted_graph_profiles()
+        return {"graph": describe(graph, relations), "profiles": _known_profiles()}
     except GraphError as e:
         raise HTTPException(500, str(e))
 
@@ -677,10 +1107,10 @@ def overview(light: str = ""):
     Pass ?light=1 (or true) to skip the per-profile state.db session lookups —
     the fast poll path when the UI only needs badges and topology."""
     try:
-        graph = describe(load_graph())
+        graph_raw, relations = _reconcile_deleted_graph_profiles()
+        graph = describe(graph_raw, relations)
     except GraphError as e:
         raise HTTPException(500, str(e))
-    relations = load_relations()
     known = _known_profiles()
     counts = _inbox_counts()
     unread = _unread_counts()
@@ -713,8 +1143,8 @@ def graph_summary():
     """Cheap header-strip payload: node count, edge count (supervisor links +
     peer pairs), and a status histogram over each bot's latest session."""
     try:
-        graph = describe(load_graph())
-        relations = load_relations()
+        graph_raw, relations = _reconcile_deleted_graph_profiles()
+        graph = describe(graph_raw, relations)
     except GraphError as e:
         raise HTTPException(500, str(e))
     edges = sum(len(v.get("subordinates") or []) for v in graph.values())
@@ -775,20 +1205,163 @@ def put_soul(name: str, body: dict):
 
 @router.put("/graph")
 def put_graph(update: GraphUpdate):
-    """Replace the graph (and optionally relations) from the UI editor."""
-    raw = {}
-    for name, node in update.nodes.items():
-        entry = {}
-        if node.supervisor:
-            entry["supervisor"] = node.supervisor
-        if node.subordinates is not None:
-            entry["subordinates"] = node.subordinates
-        raw[name] = entry
+    """Merge graph edits from the UI editor over the on-disk topology.
+
+    MERGE, not replace: nodes absent from the payload keep their disk state,
+    so a stale client tab or a half-loaded draft can never silently drop
+    other members (which later resurfaced as "'X' is not a known profile"
+    when a subsequent save referenced them). Removing a node is explicit:
+    pass its name in `remove`. Relations are replaced when provided (they
+    are validated against the merged graph)."""
     try:
-        saved = save_graph(raw, relations=update.relations if update.relations is not None else load_relations())
-        return {"ok": True, "graph": describe(saved, load_relations())}
+        _reconcile_deleted_graph_profiles()
+        with write_lock():
+            disk = load_graph()
+            known = {resolve_profile(name) for name in _known_profiles()}
+            metadata = load_metadata()
+            deleted_profiles = set(metadata.get("deleted_profiles") or [])
+
+            raw = {}
+            for name, node in update.nodes.items():
+                if name in deleted_profiles and resolve_profile(name) not in known:
+                    continue
+                entry = {}
+                if "supervisor" in node.model_fields_set:
+                    # three-state: explicit null CLEARS (demote to root),
+                    # absent PRESERVES disk state. The inspector always sends
+                    # the field, so a plain falsy check would make demotion
+                    # silently revert.
+                    entry["supervisor"] = node.supervisor
+                if node.subordinates is not None:
+                    entry["subordinates"] = node.subordinates
+                raw[name] = entry
+
+            # overlay payload onto disk state; explicit removals last
+            merged = dict(disk)
+            for name, entry in raw.items():
+                base = dict(merged.get(name, {}))
+                base.update(entry)
+                merged[name] = base
+            for name in update.remove:
+                merged.pop(name, None)
+
+            if update.relations is None:
+                relations = load_relations()
+            else:
+                relations = update.relations
+            restored = {
+                name for name in raw
+                if name in deleted_profiles and resolve_profile(name) in known
+            }
+            extra_metadata = None
+            if restored:
+                extra_metadata = {
+                    "deleted_profiles": sorted(deleted_profiles - restored),
+                }
+            saved = save_graph(
+                merged,
+                relations=relations,
+                extra_metadata=extra_metadata)
+    except GraphError as e:
+        if "busy" in str(e):
+            raise HTTPException(503, str(e))
+        raise HTTPException(422, _explain_graph_error(e))
+
+    return {"ok": True, "graph": describe(saved, load_relations())}
+
+
+def _explain_graph_error(exc: GraphError) -> str:
+    """Turn a topology validation error into an actionable operator message.
+
+    The old text appended "(known profiles: ...)" listing GRAPH MEMBERS. When
+    the rejected name was a real Hermes profile that simply had no graph node
+    yet, the operator was told it "is not a known profile" while seeing that
+    exact name in the list — self-contradictory and unactionable. Name the two
+    cases apart: an existing profile needs importing/wiring, a missing one has
+    no profile at all.
+    """
+    message = str(exc)
+    members = sorted(load_graph())
+    detail = f"{message} (current fleet members: {', '.join(members) or 'none'})"
+
+    # Which referenced name did validation reject? Pull the quoted name so the
+    # hint speaks about that specific profile rather than guessing.
+    quoted = re.findall(r"'([^']+)'", message)
+    culprits = [
+        name for name in quoted
+        if name not in members and _profile_dir(name) is not None
+    ]
+    if culprits:
+        names = ", ".join(sorted(set(culprits)))
+        return (
+            f"{detail} — profile exists but is not a fleet member yet: {names}. "
+            "Add it to the fleet first (Deck → attach under…, or the discovered "
+            "section's import), then save the hierarchy edit."
+        )
+    unknown = [
+        name for name in quoted
+        if name not in members and _profile_dir(name) is None
+    ]
+    if unknown:
+        names = ", ".join(sorted(set(unknown)))
+        return (
+            f"{detail} — no such profile: {names}. Create it in the built-in "
+            "Bots/Profiles page first, or remove the reference from this edit."
+        )
+    return detail
+
+
+class ImportProfiles(BaseModel):
+    profiles: list[str]
+    supervisor: str | None = None
+
+
+@router.get("/profiles/discover")
+def discover_profiles():
+    """On-disk Hermes profile directories not yet wired into the graph.
+
+    Delegates to the SSOT core so the CLI and dashboard can never drift.
+    Explicit-import only (no startup auto-scan), so fleet_graph.yaml stays
+    the sole source of truth for graph structure. Display metadata comes
+    from each profile's own files (profile.yaml / SOUL.md / config.yaml).
+    """
+    try:
+        graph = describe(load_graph())
+    except GraphError as e:
+        raise HTTPException(500, str(e))
+    represented = {resolve_profile(name) for name in graph}
+    discovered = []
+    for entry in discover_missing_profiles():
+        name = entry["name"]
+        if name in represented or name == DEFAULT_PROFILE:
+            continue
+        meta = _profile_meta(name)
+        cap = _capability_summary(name)
+        discovered.append({
+            "name": name,
+            "title": meta.get("title") or cap.get("headline") or entry.get("title") or name,
+            "description": cap.get("summary") or meta.get("description") or entry.get("description") or "",
+            "model": meta.get("model") or "",
+            "provider": meta.get("provider") or "",
+            "toolsets": meta.get("toolsets") or [],
+        })
+    return {"discovered": discovered}
+
+
+@router.post("/profiles/import")
+def import_profiles(batch: ImportProfiles):
+    """Wire existing on-disk profiles into the graph.
+
+    Collision policy (ruled): a requested profile that is already a graph
+    node is skipped with a warning rather than overwritten. Each imported
+    node starts unassigned unless a supervisor is supplied; the operator
+    can re-wire in the editor afterwards.
+    """
+    try:
+        result = import_existing_profiles(batch.profiles, batch.supervisor)
     except GraphError as e:
         raise HTTPException(422, str(e))
+    return {"ok": True, **result}
 
 
 @router.get("/relations")
@@ -803,12 +1376,14 @@ def get_relations():
 def put_relations(update: RelationsUpdate):
     """Replace the peer-relations map. Validated against the current graph."""
     try:
-        graph = load_graph()
-        normalized = normalize_relations(update.relations, graph)
-        save_graph(graph, relations=normalized)
+        with write_lock():
+            graph = load_graph()
+            normalized = normalize_relations(update.relations, graph)
+            save_graph(graph, relations=normalized)
         return {"ok": True, "relations": normalized}
     except GraphError as e:
-        raise HTTPException(422, str(e))
+        status = 503 if "busy" in str(e) else 422
+        raise HTTPException(status, str(e))
 
 
 @router.post("/simulate")
@@ -956,13 +1531,13 @@ def sessions_tail(profile: Optional[str] = None):
 
     Pass profile=X to scope to one bot; omit for all fleet members."""
     try:
-        graph = describe(load_graph())
+        graph_raw, relations = _reconcile_deleted_graph_profiles()
+        graph = describe(graph_raw, relations)
     except GraphError as e:
         raise HTTPException(500, str(e))
     targets = [profile] if profile else list(graph.keys())
     out = {}
     for name in targets:
-        node = graph.get(name, {"supervisor": None, "subordinates": []})
         try:
             f = _inbox_file(name)
             total = sum(1 for line in f.read_text().splitlines() if line.strip()) if f.exists() else 0
@@ -980,7 +1555,6 @@ def sessions_tail(profile: Optional[str] = None):
 
 
 # ── tiny timestamp helpers (no dependency on the full hermes_cli time path) ──
-import datetime
 
 
 def _now_epoch() -> float:
