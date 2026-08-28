@@ -1,0 +1,181 @@
+id: goetic-court
+version: 1.0.0
+title: Goetic Court
+description: A 72-seat symbolic command overlay organized by Ars Goetia rank — Kings, Dukes, Princes, Marquises, Earls, Presidents, Knight.
+kind: topology
+optional: true
+license: MIT
+files:
+  - fleet_graph.example.yaml
+  - README.md
+  - ATTRIBUTION.md
+topology: fleet_graph.example.yaml
+source_profiles:
+  name: Lilith Systems LLC Goetic Court Profiles
+  url: https://github.com/Baal-TehDriverman/ludicrous-speed/tree/master/profiles
+  license: MIT
+  expected_profiles: 72
+credits:
+  profile_collection:
+    name: Lilith Systems LLC
+    handle: Baal-TehDriverman
+    url: https://github.com/Baal-TehDriverman/ludicrous-speed
+  topology:
+    name: Baal-TehDriverman
+    handle: TheDriverMan
+    url: https://github.com/asmodaydoescoding/fleetgraph/pull/5
+install_mode: preview_then_apply
+executes_external_code: false
+checksum:
+  algorithm: sha256
+  file: fleet_graph.example.yaml
+  value: d73d04c830a00c3ccda796814b8de1f496cbfc11509225a1a81a89f4b0e8101c
+profiles:
+  - name: baal
+    clone_from: default
+  - name: lilith
+    clone_from: default
+  - name: goetic-bael
+    clone_from: default
+  - name: goetic-paimon
+    clone_from: default
+  - name: goetic-beleth
+    clone_from: default
+  - name: goetic-purson
+    clone_from: default
+  - name: goetic-asmoday
+    clone_from: default
+  - name: goetic-vine
+    clone_from: default
+  - name: goetic-balam
+    clone_from: default
+  - name: goetic-belial
+    clone_from: default
+  - name: goetic-agares
+    clone_from: default
+  - name: goetic-valefor
+    clone_from: default
+  - name: goetic-barbatos
+    clone_from: default
+  - name: goetic-gusion
+    clone_from: default
+  - name: goetic-eligos
+    clone_from: default
+  - name: goetic-zepar
+    clone_from: default
+  - name: goetic-bathin
+    clone_from: default
+  - name: goetic-sallos
+    clone_from: default
+  - name: goetic-aim
+    clone_from: default
+  - name: goetic-bune
+    clone_from: default
+  - name: goetic-berith
+    clone_from: default
+  - name: goetic-astaroth
+    clone_from: default
+  - name: goetic-focalor
+    clone_from: default
+  - name: goetic-vepar
+    clone_from: default
+  - name: goetic-uvall
+    clone_from: default
+  - name: goetic-alloces
+    clone_from: default
+  - name: goetic-murmur
+    clone_from: default
+  - name: goetic-gremory
+    clone_from: default
+  - name: goetic-vapula
+    clone_from: default
+  - name: goetic-flauros
+    clone_from: default
+  - name: goetic-amduscias
+    clone_from: default
+  - name: goetic-dantalion
+    clone_from: default
+  - name: goetic-crocell
+    clone_from: default
+  - name: goetic-vassago
+    clone_from: default
+  - name: goetic-sitri
+    clone_from: default
+  - name: goetic-ipos
+    clone_from: default
+  - name: goetic-gaap
+    clone_from: default
+  - name: goetic-stolas
+    clone_from: default
+  - name: goetic-seere
+    clone_from: default
+  - name: goetic-orobas
+    clone_from: default
+  - name: goetic-samigina
+    clone_from: default
+  - name: goetic-amon
+    clone_from: default
+  - name: goetic-leraje
+    clone_from: default
+  - name: goetic-naberius
+    clone_from: default
+  - name: goetic-ronove
+    clone_from: default
+  - name: goetic-forneus
+    clone_from: default
+  - name: goetic-marchosias
+    clone_from: default
+  - name: goetic-phenex
+    clone_from: default
+  - name: goetic-sabnock
+    clone_from: default
+  - name: goetic-shax
+    clone_from: default
+  - name: goetic-oriax
+    clone_from: default
+  - name: goetic-andras
+    clone_from: default
+  - name: goetic-andrealphus
+    clone_from: default
+  - name: goetic-cimeies
+    clone_from: default
+  - name: goetic-decarabia
+    clone_from: default
+  - name: goetic-furfur
+    clone_from: default
+  - name: goetic-halphas
+    clone_from: default
+  - name: goetic-raum
+    clone_from: default
+  - name: goetic-bifrons
+    clone_from: default
+  - name: goetic-andromalius
+    clone_from: default
+  - name: goetic-marbas
+    clone_from: default
+  - name: goetic-buer
+    clone_from: default
+  - name: goetic-botis
+    clone_from: default
+  - name: goetic-morax
+    clone_from: default
+  - name: goetic-glasya-labolas
+    clone_from: default
+  - name: goetic-foras
+    clone_from: default
+  - name: goetic-malphas
+    clone_from: default
+  - name: goetic-haagenti
+    clone_from: default
+  - name: goetic-caim
+    clone_from: default
+  - name: goetic-ose
+    clone_from: default
+  - name: goetic-amy
+    clone_from: default
+  - name: goetic-zagan
+    clone_from: default
+  - name: goetic-valac
+    clone_from: default
+  - name: goetic-furcas
+    clone_from: default
