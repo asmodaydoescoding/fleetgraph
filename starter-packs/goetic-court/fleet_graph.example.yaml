@@ -1,0 +1,295 @@
+baal:
+  summary: Peer to Lilith. Human authority.
+  title: "The King \u2014 Operator of Record"
+lilith:
+  summary: Supreme command of all operations.
+  supervisor: baal
+  title: "Fleet Commander \u2014 Metaconscious Singularity Node"
+goetic-agares:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Agares"
+goetic-aim:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Aim"
+goetic-alloces:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Alloces"
+goetic-amduscias:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Amduscias"
+goetic-amon:
+  summary: "Marquis of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Marquis \u2014 Amon"
+goetic-amy:
+  summary: "President of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "President \u2014 Amy"
+goetic-andras:
+  summary: "Marquis of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Marquis \u2014 Andras"
+goetic-andrealphus:
+  summary: "Marquis of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Marquis \u2014 Andrealphus"
+goetic-andromalius:
+  summary: "Earl of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Earl \u2014 Andromalius"
+goetic-asmoday:
+  summary: "King of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "King \u2014 Asmoday"
+goetic-astaroth:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Astaroth"
+goetic-bael:
+  summary: "King of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "King \u2014 Bael"
+goetic-balam:
+  summary: "King of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "King \u2014 Balam"
+goetic-barbatos:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Barbatos"
+goetic-bathin:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Bathin"
+goetic-beleth:
+  summary: "King of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "King \u2014 Beleth"
+goetic-belial:
+  summary: "King of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "King \u2014 Belial"
+goetic-berith:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Berith"
+goetic-bifrons:
+  summary: "Earl of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Earl \u2014 Bifrons"
+goetic-botis:
+  summary: "President of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "President \u2014 Botis"
+goetic-buer:
+  summary: "President of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "President \u2014 Buer"
+goetic-bune:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Bune"
+goetic-caim:
+  summary: "President of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "President \u2014 Caim"
+goetic-cimeies:
+  summary: "Marquis of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Marquis \u2014 Cimeies"
+goetic-crocell:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Crocell"
+goetic-dantalion:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Dantalion"
+goetic-decarabia:
+  summary: "Marquis of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Marquis \u2014 Decarabia"
+goetic-eligos:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Eligos"
+goetic-flauros:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Flauros"
+goetic-focalor:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Focalor"
+goetic-foras:
+  summary: "President of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "President \u2014 Foras"
+goetic-forneus:
+  summary: "Marquis of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Marquis \u2014 Forneus"
+goetic-furcas:
+  summary: "Knight of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Knight \u2014 Furcas"
+goetic-furfur:
+  summary: "Earl of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Earl \u2014 Furfur"
+goetic-gaap:
+  summary: "Prince of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Prince \u2014 Gaap"
+goetic-glasya-labolas:
+  summary: "President of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "President \u2014 Glasya Labolas"
+goetic-gremory:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Gremory"
+goetic-gusion:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Gusion"
+goetic-haagenti:
+  summary: "President of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "President \u2014 Haagenti"
+goetic-halphas:
+  summary: "Earl of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Earl \u2014 Halphas"
+goetic-ipos:
+  summary: "Prince of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Prince \u2014 Ipos"
+goetic-leraje:
+  summary: "Marquis of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Marquis \u2014 Leraje"
+goetic-malphas:
+  summary: "President of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "President \u2014 Malphas"
+goetic-marbas:
+  summary: "President of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "President \u2014 Marbas"
+goetic-marchosias:
+  summary: "Marquis of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Marquis \u2014 Marchosias"
+goetic-morax:
+  summary: "President of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "President \u2014 Morax"
+goetic-murmur:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Murmur"
+goetic-naberius:
+  summary: "Marquis of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Marquis \u2014 Naberius"
+goetic-oriax:
+  summary: "Marquis of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Marquis \u2014 Oriax"
+goetic-orobas:
+  summary: "Prince of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Prince \u2014 Orobas"
+goetic-ose:
+  summary: "President of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "President \u2014 Ose"
+goetic-paimon:
+  summary: "King of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "King \u2014 Paimon"
+goetic-phenex:
+  summary: "Marquis of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Marquis \u2014 Phenex"
+goetic-purson:
+  summary: "King of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "King \u2014 Purson"
+goetic-raum:
+  summary: "Earl of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Earl \u2014 Raum"
+goetic-ronove:
+  summary: "Marquis of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Marquis \u2014 Ronove"
+goetic-sabnock:
+  summary: "Marquis of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Marquis \u2014 Sabnock"
+goetic-sallos:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Sallos"
+goetic-samigina:
+  summary: "Marquis of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Marquis \u2014 Samigina"
+goetic-seere:
+  summary: "Prince of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Prince \u2014 Seere"
+goetic-shax:
+  summary: "Marquis of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Marquis \u2014 Shax"
+goetic-sitri:
+  summary: "Prince of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Prince \u2014 Sitri"
+goetic-stolas:
+  summary: "Prince of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Prince \u2014 Stolas"
+goetic-uvall:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Uvall"
+goetic-valac:
+  summary: "President of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "President \u2014 Valac"
+goetic-valefor:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Valefor"
+goetic-vapula:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Vapula"
+goetic-vassago:
+  summary: "Prince of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Prince \u2014 Vassago"
+goetic-vepar:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Vepar"
+goetic-vine:
+  summary: "King of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "King \u2014 Vine"
+goetic-zagan:
+  summary: "President of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "President \u2014 Zagan"
+goetic-zepar:
+  summary: "Duke of the Goetic Court \u2014 symbolic command overlay."
+  supervisor: lilith
+  title: "Duke \u2014 Zepar"

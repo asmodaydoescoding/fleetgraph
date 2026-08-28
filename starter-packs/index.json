@@ -27,6 +27,27 @@
           "url": "https://github.com/asmodaydoescoding/fleetgraph/pull/5"
         }
       ]
+    },
+    {
+      "id": "goetic-court",
+      "version": "1.0.0",
+      "title": "Goetic Court",
+      "description": "A 72-seat symbolic command overlay organized by Ars Goetia rank — Kings, Dukes, Princes, Marquises, Earls, Presidents, Knight.",
+      "path": "goetic-court/pack.yaml",
+      "optional": true,
+      "requires_external_profiles": false,
+      "source_profiles": "https://github.com/Baal-TehDriverman/ludicrous-speed/tree/master/profiles",
+      "topology_nodes": 72,
+      "profile_collection_size": 72,
+      "license": "MIT",
+      "credits": [
+        {
+          "role": "profile collection and topology",
+          "name": "Baal-TehDriverman",
+          "handle": "Lilith Systems LLC",
+          "url": "https://github.com/Baal-TehDriverman/ludicrous-speed"
+        }
+      ]
     }
   ]
 }
