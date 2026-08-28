@@ -30,9 +30,10 @@ from pydantic import BaseModel
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE.parent))
 from fleet_graph_core import (  # noqa: E402
-    DEFAULT_PROFILE, FLEET_HOME, GraphError, can_communicate, chain, describe,
-    graph_node_for_profile, load_graph, load_metadata, load_relations,
-    normalize_relations, resolve_profile, save_graph,
+    DEFAULT_PROFILE, FLEET_HOME, GraphError, can_communicate, can_delegate_to,
+    chain, describe, graph_node_for_profile, load_graph, load_metadata,
+    load_relations, normalize_relations, resolve_profile, save_graph,
+    subtree_depth, subtree_nodes,
 )
 
 HERMES = FLEET_HOME
@@ -389,6 +390,16 @@ class FleetSend(BaseModel):
     # supervisor (those directions are resolved from the graph). Validated
     # against the target's peer list so it can't spoof an edge.
     recipient: str | None = None
+    # Optional delegate contract — when kind=delegate, verifies the target's
+    # subtree can absorb the work before routing. Ignored for other frames.
+    # Additive: old clients omit this field, behavior unchanged.
+    delegate_contract: dict | None = None
+
+
+class DelegateCheck(BaseModel):
+    sender: str
+    recipient: str
+    contract: dict | None = None
 
 
 # The only frames the FLEET-TALK prompt section knows how to resolve. Anything
@@ -445,6 +456,12 @@ def fleet_send(msg: FleetSend):
             )
         recipient = target
         ok, why = can_communicate(graph, sender_name, target, relations)
+        if ok and msg.delegate_contract:
+            # Additive: optional contract check — verifies subtree can absorb
+            cok, cwhy = can_delegate_to(graph, sender_name, target,
+                                         msg.delegate_contract)
+            if not cok:
+                raise HTTPException(422, f"delegation refused: {cwhy}")
     elif msg.kind == "supervisor":
         # operator speaking AS this bot upward: find its supervisor
         sup = graph.get(target, {}).get("supervisor")
@@ -802,6 +819,21 @@ def simulate(send: SimulateSend):
     ok, why = can_communicate(graph, send.sender, send.recipient, relations)
     return {"ok": ok, "reason": why,
             "chain": None if why == "peer" else chain(graph, send.sender, send.recipient)}
+
+
+@router.post("/delegate-check")
+def delegate_check(check: DelegateCheck):
+    """Check whether a delegation is feasible before routing.
+
+    Additive endpoint — purely graph-based, no profile reads, no host coupling.
+    Returns {ok, reason, subtree_depth, subtree_nodes}."""
+    graph = load_graph()
+    ok, why = can_delegate_to(graph, check.sender, check.recipient, check.contract)
+    result = {"ok": ok, "reason": why}
+    if ok and check.recipient in graph:
+        result["subtree_depth"] = subtree_depth(graph, check.recipient)
+        result["subtree_nodes"] = subtree_nodes(graph, check.recipient)
+    return result
 
 
 @router.get("/inbox/{profile}")
