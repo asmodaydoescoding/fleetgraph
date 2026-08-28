@@ -434,6 +434,83 @@ def describe(graph: dict, relations: dict | None = None) -> dict:
     return out
 
 
+# ── delegation feasibility (pure graph, additive) ─────────────────────
+
+def subtree_nodes(graph: dict, node: str, max_depth: int = 5) -> list[str]:
+    """BFS: all nodes in the subordinate tree of `node` within max_depth hops.
+
+    Pure graph operation — no profile reads, no host coupling.
+    Includes `node` itself at depth 0. Returns [] if node not in graph."""
+    if node not in graph:
+        return []
+    visited: set[str] = set()
+    result: list[str] = []
+    frontier: list[tuple[str, int]] = [(node, 0)]
+    while frontier:
+        cur, depth = frontier.pop(0)
+        if cur in visited or depth > max_depth:
+            continue
+        visited.add(cur)
+        result.append(cur)
+        for sub in graph.get(cur, {}).get("subordinates", []):
+            if sub not in visited:
+                frontier.append((sub, depth + 1))
+    return result
+
+
+def subtree_depth(graph: dict, node: str) -> int:
+    """Maximum depth of the subordinate tree below `node`. Leaf = 0.
+    Pure recursion over the graph — safe for typical fleet depths (<10)."""
+    if node not in graph:
+        return 0
+    subs = graph.get(node, {}).get("subordinates", [])
+    if not subs:
+        return 0
+    return 1 + max(subtree_depth(graph, s) for s in subs)
+
+
+def can_delegate_to(graph: dict, sender: str, recipient: str,
+                    contract: dict | None = None) -> tuple[bool, str]:
+    """Structural check: can `recipient`'s subtree absorb a delegation?
+
+    Purely graph-based — no profile reads, no host coupling.
+    Checks:
+      1. sender != recipient, both known
+      2. recipient has subordinates (a leaf cannot delegate)
+      3. if contract.max_depth set, subtree depth >= max_depth
+      4. contract.max_depth clamped to >= 1
+
+    Returns (ok, reason) consistent with can_communicate contract.
+    Caller is responsible for the edge check (can_communicate) first."""
+    if sender not in graph:
+        return False, f"unknown sender '{sender}'"
+    if recipient not in graph:
+        return False, f"unknown recipient '{recipient}'"
+    if sender == recipient:
+        return False, "cannot delegate to yourself"
+
+    # Recipient must have subordinates to split work to
+    subs = graph.get(recipient, {}).get("subordinates", [])
+    if not subs:
+        return False, f"'{recipient}' has no subordinates to delegate to"
+
+    # Contract depth constraint
+    if contract and isinstance(contract, dict):
+        max_depth = contract.get("max_depth")
+        if max_depth is not None:
+            try:
+                max_depth = int(max_depth)
+            except (TypeError, ValueError):
+                return False, f"contract.max_depth must be an integer, got {max_depth!r}"
+            if max_depth < 1:
+                return False, "contract.max_depth must be >= 1"
+            available = subtree_depth(graph, recipient)
+            if available < max_depth:
+                return False, (f"'{recipient}' subtree depth {available} "
+                               f"< contract max_depth {max_depth}")
+    return True, "delegation feasible"
+
+
 # ── profile discovery + import (issue #4) ─────────────────────────────
 # Hermes keeps one directory per agent profile under FLEET_HOME/profiles/.
 # The graph YAML is the sole source of truth for topology; discovery only
