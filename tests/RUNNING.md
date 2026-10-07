@@ -81,13 +81,16 @@ readers/savers; needs only `pyyaml`):
 
 ## Public release audit
 
-Run from `tests/`, auditing the release root one level up:
+Run from `tests/`, auditing the prepared release payload. The payload root
+must contain exactly the allowlisted release files plus
+`release/allowlist.txt` — auditing a full git checkout instead reports its
+VCS and cache files as unlisted:
 
-    python3 public_release_test.py --root .. --private-denylist /secure/outside-repo/private-identifiers.txt
+    python3 public_release_test.py --root /path/to/payload --private-denylist /secure/outside-repo/private-identifiers.txt
 
 Optional exemptions file (also kept outside the repository):
 
-    python3 public_release_test.py --root .. --private-denylist /secure/outside-repo/private-identifiers.txt --exemptions /secure/outside-repo/exemptions.txt
+    python3 public_release_test.py --root /path/to/payload --private-denylist /secure/outside-repo/private-identifiers.txt --exemptions /secure/outside-repo/exemptions.txt
 
 The denylist and exemptions paths above are placeholders — point them at your
 own secure locations outside this repository.
