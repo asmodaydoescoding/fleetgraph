@@ -106,6 +106,75 @@ def write_lock(timeout: float = 10.0):
 _thread_guard = threading.RLock()
 _flock_state: dict = {"fd": None, "depth": 0}
 
+# ── Windows-safe reads + bounded save retries ──────────────────────────
+# CPython opens files without FILE_SHARE_DELETE on Windows, so any reader
+# holding the topology open makes the atomic save's os.replace() fail with
+# WinError 5 while the read handle lives. Reads therefore go through a
+# CreateFileW handle that shares delete; a replacement rename can land
+# mid-read and the reader keeps serving the previous document, matching
+# POSIX rename semantics. POSIX never needed the help.
+_GENERIC_READ = 0x80000000
+_FILE_SHARE_READ = 0x00000001
+_FILE_SHARE_WRITE = 0x00000002
+_FILE_SHARE_DELETE = 0x00000004
+_OPEN_EXISTING = 0x00000003
+_FILE_ATTRIBUTE_NORMAL = 0x00000080
+
+# Bounded retry window for the save rename when a destination handle still
+# blocks it (scanners, editors, readers older than this release). Roughly
+# 7.8 s worst case; tests shrink it via monkeypatch.
+_REPLACE_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4, 0.8, 1.2, 2.0, 3.0)
+
+
+def _windows_share_flags() -> int:
+    """Share mode for topology reads: a replacement rename must be able to
+    land while a read handle is open (FILE_SHARE_DELETE)."""
+    return _FILE_SHARE_READ | _FILE_SHARE_WRITE | _FILE_SHARE_DELETE
+
+
+def _open_read_windows(path: Path, _api=None):
+    """CreateFileW-based read handle; None when unavailable (caller falls
+    back to the plain opener). `_api` is an injection seam for tests."""
+    try:
+        import ctypes
+        if _api is None:
+            import msvcrt
+            kernel32 = ctypes.windll.kernel32
+        else:
+            kernel32, msvcrt = _api
+        create = kernel32.CreateFileW
+        create.restype = ctypes.c_void_p
+        create.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32,
+                           ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32,
+                           ctypes.c_void_p]
+        handle = create(str(path), _GENERIC_READ, _windows_share_flags(),
+                        None, _OPEN_EXISTING, _FILE_ATTRIBUTE_NORMAL, None)
+        if not handle or handle == ctypes.c_void_p(-1).value:
+            return None
+        try:
+            fd = msvcrt.open_osfhandle(handle, os.O_RDONLY)
+        except (OSError, ValueError):
+            kernel32.CloseHandle(handle)
+            return None
+        try:
+            return open(fd, "r")
+        except OSError:
+            os.close(fd)
+            return None
+    except Exception:
+        return None
+
+
+def _open_read(path: Path):
+    """Open the topology for reading. On Windows the handle shares delete so
+    a concurrent save can replace the file underneath it; anywhere else (or
+    when the share-aware open is unavailable) this is the plain opener."""
+    if os.name == "nt":
+        handle = _open_read_windows(path)
+        if handle is not None:
+            return handle
+    return open(path)
+
 
 class GraphError(ValueError):
     pass
@@ -115,7 +184,7 @@ def _load_raw() -> dict:
     """Read the complete on-disk document under the GraphError contract."""
     if GRAPH_PATH.exists():
         try:
-            with open(GRAPH_PATH) as f:
+            with _open_read(GRAPH_PATH) as f:
                 data = yaml.safe_load(f) or {}
         except yaml.YAMLError as e:
             # corrupt file: raise inside the GraphError contract so every
@@ -273,18 +342,19 @@ def save_graph(graph: dict, relations: dict | None = None,
             yaml.safe_dump(doc, f, sort_keys=True, default_flow_style=False)
             f.flush()
             os.fsync(f.fileno())
-        # Windows: concurrent os.replace() to the same destination raises
-        # PermissionError (WinError 5) because NTFS rename is exclusive on the
-        # target file. Retry with exponential backoff so concurrent savers
-        # serialize on the rename instead of crashing. No-op on POSIX where
-        # this never triggers.
-        for attempt, delay in enumerate((0.05, 0.1, 0.2, 0.4, 0.8)):
+        # Windows: os.replace() onto the topology raises PermissionError
+        # (WinError 5) while any handle holds the destination open. Reader
+        # handles share delete now (see _open_read), and this bounded retry
+        # covers residual collisions (scanners, editors, readers older than
+        # this release) instead of crashing a save. No-op on POSIX where
+        # rename() never triggers it.
+        for attempt, delay in enumerate(_REPLACE_RETRY_DELAYS):
             try:
                 os.replace(tmp_path, GRAPH_PATH)
                 tmp_path = None
                 break
-            except (PermissionError, OSError):
-                if attempt < 4:
+            except OSError:
+                if attempt < len(_REPLACE_RETRY_DELAYS) - 1:
                     time.sleep(delay)
                 else:
                     raise

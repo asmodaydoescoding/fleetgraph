@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Static audit: acorn parse + loader-regex count + token/key scan."""
+"""Static audit: acorn parse + loader-regex count + token/key scan +
+line-ending contract."""
 import os
 import re
 import subprocess
@@ -38,4 +39,16 @@ dead_classes = [name for name in css_classes
                 if len(re.findall(rf"(?<![a-z0-9-]){re.escape(name)}(?![a-z0-9-])", src)) < 2]
 print("unwired fleet CSS classes:", dead_classes)
 ok = ok and not dead_classes
+
+# Line-ending contract: .gitattributes pins LF for the loader-parsed plugin
+# and the line-anchored test harnesses, and the plugin itself must ship
+# without CRLF bytes (a CRLF checkout breaks line-anchored matchers).
+ATTRIBUTES = Path(PLUGIN).resolve().parents[1] / ".gitattributes"
+required_eol = ("desktop-plugin/plugin.js", "tests/*.mjs", "tests/**/*.mjs")
+attr_text = ATTRIBUTES.read_text() if ATTRIBUTES.is_file() else ""
+missing_eol = [p for p in required_eol
+               if not re.search(rf"(?m)^{re.escape(p)}\s+text\s+eol=lf$", attr_text)]
+crlf = b"\r\n" in Path(PLUGIN).read_bytes()
+print("eol contract:", "OK" if not (missing_eol or crlf) else f"FAIL missing={missing_eol} crlf={crlf}")
+ok = ok and not (missing_eol or crlf)
 sys.exit(0 if ok else 1)

@@ -1,0 +1,6 @@
+# Line-ending contract: the Hermes desktop loader and the test harnesses
+# parse these files with line-anchored matchers, so every checkout must
+# deliver LF bytes (Windows contributors included).
+desktop-plugin/plugin.js text eol=lf
+tests/*.mjs text eol=lf
+tests/**/*.mjs text eol=lf

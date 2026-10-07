@@ -74,6 +74,11 @@ no network, no installed dependencies beyond `pyyaml`):
 
     python3 public_integration_test.py
 
+Core save durability (share-aware reads, rename retries, concurrent
+readers/savers; needs only `pyyaml`):
+
+    python3 core_save_durability_test.py
+
 ## Public release audit
 
 Run from `tests/`, auditing the release root one level up:

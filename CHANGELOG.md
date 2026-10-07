@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.8.0 — post-release fixes (2026-10-08)
+
+### Fixed
+
+- **Windows concurrent saves (issue #2 re-test).** Reader handles now open
+  the topology with delete-sharing (`FILE_SHARE_DELETE`) so the atomic
+  replacement rename can land while a read is in flight — the reported
+  deterministic `WinError 5` failure under the loop8 read/write load. The
+  save path additionally rides out residual rename collisions across a
+  wider bounded window (~7.8 s) and stays fail-loud when the rename never
+  lands. Regression coverage: `tests/core_save_durability_test.py`.
+- **Cross-platform line endings.** `.gitattributes` pins LF for the desktop
+  plugin and the test harnesses so Windows checkouts match CI byte-for-byte
+  (previously `autocrlf` could break the boundary harness's line-anchored
+  matcher).
+- **Stale install-contract pin.** `install_contract_test.py` now tracks the
+  README's verified tree pin again instead of a superseded revision.
+
+### Changed
+
+- **Deck & inspector polish.** The fleet-stat counts in the header are
+  clickable triage shortcuts (they switch to the deck and apply the matching
+  filter); the docked inspector becomes an overlay on narrow windows instead
+  of squeezing the deck; the header and filter rows wrap instead of
+  overflowing; the Deck/Graph view choice persists across mounts; an empty
+  filtered deck offers a one-click "clear filters".
+- **Message composer.** `Ctrl/Cmd + Enter` sends, and a stale result line
+  clears when the frame or bot changes so it cannot describe a send that no
+  longer matches.
+- **Import error states.** A failed profile-directory scan shows the error
+  with a retry action instead of claiming there is nothing to import.
+
 ## 0.8.0 — 2026-08-24
 
 ### Added
