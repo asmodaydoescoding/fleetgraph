@@ -871,9 +871,19 @@ function CreateProfile({ onDone, onClose, existingProfiles }) {
             showImport && jsxs('div', { className: 'mt-2 flex flex-col gap-2', children: [
               discoverQ.isLoading
                 ? jsx('div', { className: 'text-xs text-(--ui-text-secondary)', children: 'scanning profile directory…' })
-                : discovered.length === 0
-                  ? jsx('div', { className: 'text-xs text-(--ui-text-secondary)', children: 'no unwired on-disk profiles found: every profile is already in the graph' })
-                  : discovered.map(d => {
+                : discoverQ.isError
+                  ? jsxs('div', { className: 'text-xs text-(--fg-danger)', children: [
+                      `could not scan the profile directory: ${String(discoverQ.error?.message || discoverQ.error || 'unknown error')}`,
+                      jsx('button', {
+                        type: 'button',
+                        className: 'ml-1 underline',
+                        onClick: () => discoverQ.refetch?.(),
+                        children: 'retry',
+                      }, 'imp-retry'),
+                    ] })
+                  : discovered.length === 0
+                    ? jsx('div', { className: 'text-xs text-(--ui-text-secondary)', children: 'no unwired on-disk profiles found: every profile is already in the graph' })
+                    : discovered.map(d => {
                       const on = selectedImports.has(d.name)
                       return jsx('label', {
                         className: 'flex items-start gap-2 text-xs cursor-pointer',
@@ -1088,6 +1098,17 @@ function MessageComposer({ name, node, relations }) {
   const deliveryLabel = result?.delivery?.state === 'queued' ? 'queued'
     : result?.delivery?.state === 'failed' ? 'inbox recorded; live start failed'
     : 'recorded'
+  // One send path for the button and the keyboard chord. The recipient rides
+  // along for the talk frame only (validated server-side against the peer
+  // list); delegate/supervisor resolve it from the graph. The button gates on
+  // `disabled`; the keyboard path checks `canSend` itself.
+  const submit = () => {
+    send.mutate({ to: name, kind, live: true, text: text.trim(),
+      ...(kind === 'talk' && effectiveTarget ? { recipient: effectiveTarget } : {}) })
+  }
+  // A new frame or bot is a new conversation — drop the previous result
+  // line instead of letting it describe a send that no longer matches.
+  useEffect(() => { setResult(null) }, [name, kind])
 
   return jsxs('div', { className: 'flex flex-col gap-2.5', children: [
     jsx('div', { className: 'text-[0.6875rem] leading-4 text-(--ui-text-secondary)', children:
@@ -1124,14 +1145,21 @@ function MessageComposer({ name, node, relations }) {
       className: 'h-24 resize-none text-xs font-mono',
       placeholder: 'message — specific instructions are queued into Bot Chat; inbox copy retained',
       value: text, onChange: e => setText(e.target.value),
+      onKeyDown: e => {
+        if (!e.defaultPrevented && (e.metaKey || e.ctrlKey) && e.key === 'Enter' && canSend) {
+          e.preventDefault()
+          submit()
+        }
+      },
     }),
-    jsx(Button, {
-      disabled: !canSend,
-      // recipient rides along for the talk frame only (validated server-side
-      // against the peer list); delegate/supervisor resolve it from the graph.
-      onClick: () => send.mutate({ to: name, kind, live: true, text: text.trim(), ...(kind === 'talk' && effectiveTarget ? { recipient: effectiveTarget } : {}) }),
-      children: send.isPending ? 'starting…' : 'Start conversation'
-    }),
+    jsxs('div', { className: 'flex items-center gap-2', children: [
+      jsx(Button, {
+        disabled: !canSend,
+        onClick: () => submit(),
+        children: send.isPending ? 'starting…' : 'Start conversation'
+      }),
+      jsx('span', { className: 'text-[0.625rem] text-(--ui-text-secondary)', children: 'Ctrl/Cmd + Enter also sends' }),
+    ] }),
     result && jsx('div', {
       className: cn('rounded-md border p-2 text-[0.6875rem] leading-4',
         result.ok && result.delivery?.state !== 'failed' ? 'border-(--fg-success)/40 text-(--ui-text-secondary)' : 'border-(--fg-danger)/50 text-(--fg-danger)'),
@@ -1368,16 +1396,19 @@ function Inspector({ name, node, tab, setTab, onClose, onMarkRead,
         ] }),
         jsx('button', {
           type: 'button', onClick: onClose,
+          title: 'Close inspector', 'aria-label': 'Close inspector',
           className: 'rounded-md border border-(--ui-stroke-secondary) px-2 py-0.5 text-xs hover:bg-(--chrome-action-hover)',
           children: '✕'
         }),
       ] }),
       // tab strip
       jsx('div', { className: 'flex gap-1 border-b border-(--ui-stroke-secondary) px-3 py-1.5',
+        role: 'tablist',
         children: tabs.map(([k, label]) => jsx('button', {
           type: 'button', onClick: () => setTab(k),
+          role: 'tab', 'aria-selected': tab === k,
           className: cn('rounded px-2 py-0.5 text-[0.6875rem] transition-colors',
-            tab === k ? 'bg-(--chrome-action-hover) font-medium' : 'text-(--ui-text-secondary) hover:text-(--ui-text-secondary)'),
+            tab === k ? 'bg-(--chrome-action-hover) font-medium' : 'text-(--ui-text-secondary) hover:text-(--ui-text-primary)'),
           children: label
         }, k))
       }),
@@ -2099,7 +2130,17 @@ function FleetGraphPage() {
   const [creating, setCreating] = useState(false)
   const [savedFlash, setSavedFlash] = useState(false)
   const [err, setErr] = useState(null)
-  const [view, setView] = useState('tree') // 'tree' | 'canvas'
+  // Deck/Graph preference persists across mounts (same storage contract as
+  // the canvas viewport); an absent or invalid value opens the Deck.
+  const [view, setView] = useState(() => {
+    try {
+      const saved = api?.storage?.get?.('view')
+      return saved === 'canvas' || saved === 'tree' ? saved : 'tree'
+    } catch { return 'tree' }
+  })
+  useEffect(() => {
+    try { api?.storage?.set?.('view', view) } catch {}
+  }, [view])
   const [liveProfiles, setLiveProfiles] = useState({})
   const [tailOpen, setTailOpen] = useState(null)
   const [inspectorTab, setInspectorTab] = useState('live')
@@ -2360,7 +2401,7 @@ function FleetGraphPage() {
       onClose: () => setCreating(false),
       existingProfiles: nodes
     }),
-    jsxs('div', { className: 'flex items-center gap-3 px-4 pt-3 pb-2 border-b border-(--ui-stroke-secondary)', children: [
+    jsxs('div', { className: 'flex flex-wrap items-center gap-3 px-4 pt-3 pb-2 border-b border-(--ui-stroke-secondary)', children: [
       jsxs('div', { className: 'flex items-baseline gap-2', children: [
         jsx('div', { className: 'text-base font-semibold', children: 'Fleet Command' }),
         jsx('span', { className: 'rounded-full border border-(--ui-stroke-secondary) px-1.5 text-[0.5625rem] font-mono uppercase tracking-wider text-(--ui-text-secondary)', children: 'v0.8.0' }),
@@ -2388,8 +2429,22 @@ function FleetGraphPage() {
         const attention = all.filter(v => (v.unread || 0) > 0 || v.latest_session?.status === 'interrupted').length
         return [
           jsxs('span', { children: [all.length, ' bots'] }, 'st-bots'),
-          conversing > 0 ? jsx('span', { style: { color: 'var(--fg-accent)' }, children: `${conversing} conversing` }, 'st-live') : null,
-          attention > 0 ? jsx('span', { style: { color: 'var(--fg-warning)' }, children: `${attention} need attention` }, 'st-attn') : null,
+          conversing > 0 ? jsx('button', {
+            type: 'button',
+            title: 'Filter the deck to conversing bots',
+            onClick: () => { setStatusFilter('active'); setView('tree') },
+            className: 'rounded px-1 -mx-1 transition-colors hover:bg-(--chrome-action-hover)',
+            style: { color: 'var(--fg-accent)' },
+            children: `${conversing} conversing`,
+          }, 'st-live') : null,
+          attention > 0 ? jsx('button', {
+            type: 'button',
+            title: 'Filter the deck to bots that need attention',
+            onClick: () => { setStatusFilter('attention'); setView('tree') },
+            className: 'rounded px-1 -mx-1 transition-colors hover:bg-(--chrome-action-hover)',
+            style: { color: 'var(--fg-warning)' },
+            children: `${attention} need attention`,
+          }, 'st-attn') : null,
         ]
       })() }),
       jsx(Button, {
@@ -2400,7 +2455,7 @@ function FleetGraphPage() {
     jsx(StarterPacksPanel, { nodes }),
     jsx(WorkflowPanel, { nodes }),
     // search + status filter row (tree view only)
-    view === 'tree' && jsxs('div', { className: 'flex items-center gap-2 px-4 pb-1.5', children: [
+    view === 'tree' && jsxs('div', { className: 'flex flex-wrap items-center gap-2 px-4 pb-1.5', children: [
       jsx(Input, {
         value: search, onChange: e => setSearch(e.target.value),
         placeholder: 'search bots, roles, capabilities…',
@@ -2410,10 +2465,11 @@ function FleetGraphPage() {
         [['all', 'All'], ['active', 'Conversing'], ['idle', 'Idle'], ['attention', 'Needs attention']].map(([k, label]) =>
           jsx('button', {
             type: 'button', onClick: () => setStatusFilter(k),
+            'aria-pressed': statusFilter === k,
             className: cn('rounded-full border px-2 py-px text-[0.6875rem] transition-colors',
               statusFilter === k
                 ? 'border-(--ui-accent) bg-(--ui-accent)/10 font-medium text-(--ui-accent)'
-                : 'border-(--ui-stroke-secondary) text-(--ui-text-secondary) hover:text-(--ui-text-secondary)'),
+                : 'border-(--ui-stroke-secondary) text-(--ui-text-secondary) hover:text-(--ui-text-primary)'),
             children: label
           }, k))
       }),
@@ -2434,7 +2490,7 @@ function FleetGraphPage() {
             hasUnsavedChanges: dirty,
           }),
         ] })
-      : jsxs('div', { className: 'flex min-h-0 flex-1 overflow-hidden', children: [
+      : jsxs('div', { className: 'relative flex min-h-0 flex-1 overflow-hidden', children: [
           // center: the deck — attention first, then the full chain
           jsxs('div', { className: 'min-w-0 flex-1 overflow-auto p-3', children: [
             // ── NEEDS ATTENTION: unread or interrupted — triage pile first ──
@@ -2522,10 +2578,18 @@ function FleetGraphPage() {
               ] }, `ua-${u}`)) })
             ] }),
             teamLeads.length === 0 && !unassigned.length &&
-              jsx('div', { className: 'px-1 py-8 text-center text-xs text-(--ui-text-secondary)', children: 'no bots match the current filter' }),
+              jsxs('div', { className: 'px-1 py-8 text-center text-xs text-(--ui-text-secondary)', children: [
+                jsx('div', { children: 'no bots match the current filter' }),
+                (search.trim() || statusFilter !== 'all') ? jsx('button', {
+                  type: 'button',
+                  onClick: () => { setSearch(''); setStatusFilter('all') },
+                  className: 'mt-2 rounded-md border border-(--ui-stroke-secondary) px-2 py-0.5 text-[0.6875rem] hover:bg-(--chrome-action-hover)',
+                  children: 'clear filters',
+                }, 'clear-filters') : null,
+              ] }),
           ] }),
           // right zone: docked inspector — always visible when a bot is selected
-          tailOpen && nodes[tailOpen] ? jsxs('div', { className: 'relative w-[24rem] shrink-0 border-l border-(--ui-stroke-secondary)', children: [
+          tailOpen && nodes[tailOpen] ? jsxs('div', { className: 'relative z-20 w-[24rem] max-w-[92vw] shrink-0 border-l border-(--ui-stroke-secondary) max-lg:absolute max-lg:inset-y-0 max-lg:right-0 max-lg:shadow-lg', children: [
             jsx(Inspector, {
               name: tailOpen, node: nodes[tailOpen],
               tab: inspectorTab, setTab: setInspectorTab,
