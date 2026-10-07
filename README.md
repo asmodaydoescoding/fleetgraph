@@ -185,7 +185,7 @@ scan, records the source/revision, and enables the backend explicitly.
 
 ```bash
 # Pin the verified Fleetgraph v0.8.0 tree for reproducible installation.
-FLEET_GRAPH_REF="52a288a"
+FLEET_GRAPH_REF="94afb08bfb5d0c1e62ebb5efa9e8dd99b45350f7"
 hermes plugins install asmodaydoescoding/fleetgraph \\
   --ref "$FLEET_GRAPH_REF" \\
   --enable
@@ -371,14 +371,16 @@ Integration and backend suites:
 python3 tests/public_integration_test.py       # hermetic end-to-end suite; expect INTEGRATION SUMMARY with 0 failed
 python3 tests/backend_loop8_test.py            # expect BACKEND LOOP8 SUMMARY: 23 passed, 0 failed
 python3 tests/communication_live_test.py        # expect COMMUNICATION LIVE SUMMARY: 12 passed, 0 failed
+python3 tests/core_save_durability_test.py     # expect CORE SAVE DURABILITY SUMMARY: 10 passed, 0 failed
 python3 tests/configurability_test.py          # expect CONFIGURABILITY SUMMARY: 21 passed, 0 failed
 ```
 
-Static audit (parse, loader-import count, token/key hygiene):
+Static audit (parse, loader-import count, token/key hygiene, line-ending
+contract):
 
 ```bash
 python3 tests/a1_audit.py
-# expect: PARSE OK · loader imports: 3 · token/key findings: 0
+# expect: PARSE OK · loader imports: 3 · token/key findings: 0 · eol contract: OK
 ```
 
 Design tokens live in one block (`TOKENS_CSS`) at the top of `plugin.js`,
@@ -406,5 +408,5 @@ comments or strings. Verify after edits:
 ```bash
 node --check desktop-plugins/fleet-graph/plugin.js
 python3 tests/a1_audit.py
-# Expected: PARSE OK, loader imports: 3, token/key findings: 0
+# Expected: PARSE OK, loader imports: 3, token/key findings: 0, eol contract: OK
 ```
