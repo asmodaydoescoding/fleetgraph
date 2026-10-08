@@ -30,6 +30,8 @@ tests/c4-create-probe.mjs
 tests/communication_live_test.py
 tests/configurability_test.py
 tests/core_save_durability_test.py
+tests/delegation_endpoint_test.py
+tests/delegation_feasibility_test.py
 tests/drive-harness.mjs
 tests/helpers/generic-fleet.mjs
 tests/helpers/paths.mjs
