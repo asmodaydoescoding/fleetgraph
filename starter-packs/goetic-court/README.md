@@ -1,6 +1,6 @@
 # Goetic Court — Fleetgraph Starter Pack
 
-> A symbolic command overlay for Lilith's fleet: 72 Ars Goetia officer profiles organized by rank, mapped to the Fleetgraph topology.
+> A symbolic command overlay for Lilith's fleet: 72 Ars Goetia officer profiles organized by rank, mapped to the Fleetgraph topology — 74 nodes in total (the 72 officers plus `baal` and `lilith`).
 
 ---
 
@@ -46,12 +46,16 @@ The pack is **optional** and **inert** — it contains no executable code, only 
 
 This pack is a **GOOP Agent collection** in Agent Wiki terms:
 
-- **Context** — `research/goetic-court-throne.md` (the charter)
+- **Context** — `README.md` + `ATTRIBUTION.md` (the charter, shipped in this pack)
 - **Agents** — 72 officer profiles with SOUL.md directives
 - **Skills** — rank-specific operating postures
 - **Loops** — bounded by Fleetgraph's delegation feasibility checks
 
-The philosophical foundations mapping 20 ancient thinkers to the Lilith architecture live in `research/philosophical-foundations.md`.
+Two background documents live in the **ludicrous-speed research tree**, not in
+this pack, and are not required for the pack to function:
+
+- https://github.com/Baal-TehDriverman/ludicrous-speed/blob/master/research/goetic-court-throne.md — the structural command charter
+- https://github.com/Baal-TehDriverman/ludicrous-speed/blob/master/research/philosophical-foundations.md — 20 ancient thinkers mapped to the Lilith architecture
 
 ---
 

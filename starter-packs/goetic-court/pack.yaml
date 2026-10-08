@@ -1,7 +1,7 @@
 id: goetic-court
 version: 1.0.0
 title: Goetic Court
-description: A 72-seat symbolic command overlay organized by Ars Goetia rank — Kings, Dukes, Princes, Marquises, Earls, Presidents, Knight.
+description: "A 72-officer symbolic command overlay (74 topology nodes: 72 Ars Goetia officers plus baal and lilith) organized by rank — Kings, Dukes, Princes, Marquises, Earls, Presidents, Knight."
 kind: topology
 optional: true
 license: MIT

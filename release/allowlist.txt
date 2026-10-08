@@ -10,6 +10,10 @@ starter_pack.py
 skills/fleet-bot-advisor/SKILL.md
 skills/fleet-hierarchy-builder/SKILL.md
 starter-packs/index.json
+starter-packs/goetic-court/ATTRIBUTION.md
+starter-packs/goetic-court/README.md
+starter-packs/goetic-court/fleet_graph.example.yaml
+starter-packs/goetic-court/pack.yaml
 starter-packs/starfleet-complement/ATTRIBUTION.md
 starter-packs/starfleet-complement/README.md
 starter-packs/starfleet-complement/fleet_graph.example.yaml

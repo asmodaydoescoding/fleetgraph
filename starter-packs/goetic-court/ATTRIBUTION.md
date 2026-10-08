@@ -29,11 +29,16 @@ These public-domain editions demonstrate the textual variation within the Goetia
 
 ## Philosophical Foundations
 
-The rank-to-Sephirah mapping and the broader philosophical framework live in:
+The rank-to-Sephirah mapping and the broader philosophical framework live in the
+**ludicrous-speed research tree**, not in this pack — they are background reading,
+not required for the pack to function:
 
-- `research/goetic-court-throne.md` — structural command charter
-- `research/philosophical-foundations.md` — 20 ancient thinkers mapped to the Lilith architecture
-- `research/philosophical-foundations-paste.txt` — extended research notes on the philosophers
+- https://github.com/Baal-TehDriverman/ludicrous-speed/blob/master/research/goetic-court-throne.md — structural command charter
+- https://github.com/Baal-TehDriverman/ludicrous-speed/blob/master/research/philosophical-foundations.md — 20 ancient thinkers mapped to the Lilith architecture
+
+Nothing in this pack reads these files. The pack is fully functional from
+`pack.yaml`, `fleet_graph.example.yaml`, `README.md`, and `ATTRIBUTION.md` alone;
+the profiles resolve from the ludicrous-speed profile collection cited above.
 
 ---
 
